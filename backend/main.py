@@ -1,15 +1,17 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Dict
-import uuid
-from fastapi import HTTPException
 
+from .database import Base, engine, SessionLocal
+from .models import Project
+
+# Create tables if they don’t already exist
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Still keep CORSMiddleware for normal requests
+# CORS middleware (allow everything for now)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,59 +20,105 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Fallback: catch ALL OPTIONS requests manually
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(request: Request, rest_of_path: str):
-    return JSONResponse(
-        content={},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        },
-    )
+# Dependency for DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# -----------------------
-# Project API
-# -----------------------
-
-projects: Dict[str, dict] = {}
-
-class Project(BaseModel):
+# -----------------------------
+# Pydantic Schemas
+# -----------------------------
+class ProjectCreate(BaseModel):
     title: str
     description: str
     goals: str
+
+class ProjectUpdate(BaseModel):
+    title: str
+    description: str
+    goals: str
+
+# -----------------------------
+# Routes
+# -----------------------------
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
+
+# Create project
 @app.post("/projects")
-def create_project(project: Project):
-    project_id = str(uuid.uuid4())
-    projects[project_id] = project.dict()
-    return {"id": project_id, "project": projects[project_id]}
+def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
+    db_project = Project(
+        title=project.title,
+        description=project.description,
+        goals=project.goals
+    )
+    db.add(db_project)
+    db.commit()
+    db.refresh(db_project)
+    return {"id": db_project.id, "project": {
+        "title": db_project.title,
+        "description": db_project.description,
+        "goals": db_project.goals
+    }}
 
-@app.get("/projects/{project_id}")
-def get_project(project_id: str):
-    if project_id not in projects:
-        return {"error": "Project not found"}
-    return {"id": project_id, "project": projects[project_id]}
 
+# List all projects
 @app.get("/projects")
-def list_projects():
-    return {"projects": [{"id": pid, **pdata} for pid, pdata in projects.items()]}
+def list_projects(db: Session = Depends(get_db)):
+    projects = db.query(Project).all()
+    return {"projects": [
+        {"id": p.id, "title": p.title, "description": p.description, "goals": p.goals}
+        for p in projects
+    ]}
 
+
+# Get a single project
+@app.get("/projects/{project_id}")
+def get_project(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"id": project.id, "project": {
+        "title": project.title,
+        "description": project.description,
+        "goals": project.goals
+    }}
+
+
+# Update project
 @app.put("/projects/{project_id}")
-def update_project(project_id: str, project: Project):
-    if project_id not in projects:
+def update_project(project_id: str, project: ProjectUpdate, db: Session = Depends(get_db)):
+    db_project = db.query(Project).filter(Project.id == project_id).first()
+    if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
-    projects[project_id] = project.dict()
-    return {"id": project_id, "project": projects[project_id]}
 
+    db_project.title = project.title
+    db_project.description = project.description
+    db_project.goals = project.goals
+    db.commit()
+    db.refresh(db_project)
+
+    return {"id": db_project.id, "project": {
+        "title": db_project.title,
+        "description": db_project.description,
+        "goals": db_project.goals
+    }}
+
+
+# Delete project
 @app.delete("/projects/{project_id}")
-def delete_project(project_id: str):
-    if project_id not in projects:
+def delete_project(project_id: str, db: Session = Depends(get_db)):
+    db_project = db.query(Project).filter(Project.id == project_id).first()
+    if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
-    deleted = projects.pop(project_id)
-    return {"id": project_id, "deleted": deleted}
+
+    db.delete(db_project)
+    db.commit()
+
+    return {"id": project_id, "deleted": True}
