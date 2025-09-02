@@ -1,61 +1,53 @@
-// Base API URL: configurable via Vite environment variables
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
-
-// Helper: handle responses & errors
-async function handleResponse(res: Response) {
-  if (!res.ok) {
-    let errorMsg;
-    try {
-      errorMsg = await res.text();
-    } catch {
-      errorMsg = "API request failed";
-    }
-    throw new Error(`${res.status}: ${errorMsg}`);
-  }
+export async function getProjects() {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE}/projects`);
+  if (!res.ok) throw new Error("Failed to fetch projects");
   return res.json();
 }
 
-// -----------------------------
-// CRUD Functions
-// -----------------------------
+export async function getProject(id: string) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE}/projects/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch project");
+  return res.json();
+}
 
-// Create project
-export async function createProject(project: {
-  title: string;
-  description: string;
-  goals: string;
-}) {
-  const res = await fetch(`${API_BASE}/projects`, {
+export async function createProject(data: { title: string; description: string; goals: string }) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE}/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(project),
+    body: JSON.stringify(data),
   });
-  return handleResponse(res);
+  if (!res.ok) throw new Error("Failed to create project");
+  return res.json();
 }
 
-// Get all projects
-export async function getProjects() {
-  const res = await fetch(`${API_BASE}/projects`);
-  return handleResponse(res);
-}
-
-// Update a project
-export async function updateProject(
-  id: string,
-  project: { title: string; description: string; goals: string }
-) {
-  const res = await fetch(`${API_BASE}/projects/${id}`, {
+export async function updateProject(id: string, data: { title: string; description: string; goals: string }) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE}/projects/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(project),
+    body: JSON.stringify(data),
   });
-  return handleResponse(res);
+  if (!res.ok) throw new Error("Failed to update project");
+  return res.json();
 }
 
-// Delete a project
 export async function deleteProject(id: string) {
-  const res = await fetch(`${API_BASE}/projects/${id}`, {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE}/projects/${id}`, {
     method: "DELETE",
   });
-  return handleResponse(res);
+  if (!res.ok) throw new Error("Failed to delete project");
+  return res.json();
+}
+
+export async function generateRoadmap(projectId: string) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE}/projects/${projectId}/roadmap`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to generate roadmap");
+  return res.json();
+}
+
+export async function getRoadmap(projectId: string) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE}/projects/${projectId}/roadmap`);
+  if (!res.ok) throw new Error("Failed to fetch roadmap");
+  return res.json();
 }

@@ -2,9 +2,11 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from .database import Base, engine, SessionLocal, get_db
 
 from .database import Base, engine, SessionLocal
 from .models import Project
+from . import roadmap   # 👈 NEW: import roadmap endpoints
 
 # Create tables if they don’t already exist
 Base.metadata.create_all(bind=engine)
@@ -122,3 +124,9 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"id": project_id, "deleted": True}
+
+
+# -----------------------------
+# Include Roadmap Router
+# -----------------------------
+app.include_router(roadmap.router)

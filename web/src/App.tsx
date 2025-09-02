@@ -1,203 +1,216 @@
-import { useEffect, useState, useRef } from "react";
-import { createProject, getProjects, updateProject, deleteProject } from "./api";
-
-// Reusable Spinner Component
-function Spinner() {
-  return (
-    <div className="flex justify-center items-center">
-      <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-    </div>
-  );
-}
+import { useEffect, useState } from "react";
+import { getProjects, createProject, updateProject, deleteProject } from "./api";
+import ProjectDetail from "./components/ProjectDetail";
 
 function App() {
-  // State: list of projects
   const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // State: form fields
-  const [form, setForm] = useState({ title: "", description: "", goals: "" });
-
-  // State: track if editing a project
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  // State: messages for user feedback
+  // Messages
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // State: loading indicators
-  const [loading, setLoading] = useState(false); // for form actions
-  const [loadingProjects, setLoadingProjects] = useState(true); // for fetching projects
-
-  // Ref: used to auto-focus the title input when needed
-  const titleInputRef = useRef<HTMLInputElement>(null);
-
-  // Fetch projects on first render
+  // Auto-clear messages after 3 seconds
   useEffect(() => {
-    setLoadingProjects(true);
+    if (successMessage || errorMessage) {
+      const timer = setTimeout(() => {
+        setSuccessMessage(null);
+        setErrorMessage(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage, errorMessage]);
+
+  // Fetch projects on load
+  useEffect(() => {
+    setLoading(true);
     getProjects()
-      .then((data) => setProjects(data.projects))
-      .catch(() => {
-        setErrorMessage("❌ Failed to load projects");
-        setTimeout(() => setErrorMessage(null), 3000);
-      })
-      .finally(() => setLoadingProjects(false));
+      .then((data) => setProjects(data.projects || []))
+      .catch(() => setErrorMessage("❌ Failed to fetch projects"))
+      .finally(() => setLoading(false));
   }, []);
 
-  // Handle form submit → create or update project
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const title = formData.get("title") as string;
+    const description = formData.get("description") as string;
+    const goals = formData.get("goals") as string;
 
     try {
-      if (editingId) {
-        const updated = await updateProject(editingId, form);
-        setProjects(
-          projects.map((p) =>
-            p.id === editingId ? { id: updated.id, ...updated.project } : p
-          )
-        );
-        setEditingId(null);
-        setSuccessMessage("✅ Project updated successfully");
-      } else {
-        const newProj = await createProject(form);
-        setProjects([...projects, { id: newProj.id, ...newProj.project }]);
-        setSuccessMessage("✅ Project created successfully");
-      }
-
-      setForm({ title: "", description: "", goals: "" });
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setErrorMessage("❌ Failed to save project");
-      setTimeout(() => setErrorMessage(null), 3000);
-    } finally {
-      setLoading(false);
+      const newProject = await createProject({ title, description, goals });
+      setProjects([...projects, newProject]);
+      setSuccessMessage("✅ Project created successfully!");
+      form.reset();
+    } catch {
+      setErrorMessage("❌ Failed to create project");
     }
-  };
+  }
 
-  // Handle edit → load project into form
-  const handleEdit = (p: any) => {
-    setForm({ title: p.title, description: p.description, goals: p.goals });
-    setEditingId(p.id);
-    titleInputRef.current?.focus();
-  };
-
-  // Handle delete → remove project
-  const handleDelete = async (id: string) => {
-    setLoading(true);
+  async function handleDelete(id: string) {
     try {
       await deleteProject(id);
       setProjects(projects.filter((p) => p.id !== id));
-      setSuccessMessage("🗑️ Project deleted successfully");
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
+      setSuccessMessage("🗑️ Project deleted successfully!");
+    } catch {
       setErrorMessage("❌ Failed to delete project");
-      setTimeout(() => setErrorMessage(null), 3000);
-    } finally {
-      setLoading(false);
     }
-  };
+  }
+
+  async function handleUpdate(e: React.FormEvent<HTMLFormElement>, id: string) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const title = formData.get("title") as string;
+    const description = formData.get("description") as string;
+    const goals = formData.get("goals") as string;
+
+    try {
+      const updated = await updateProject(id, { title, description, goals });
+      setProjects(
+        projects.map((p) => (p.id === id ? { ...p, ...updated.project } : p))
+      );
+      setEditingProjectId(null);
+      setSuccessMessage("✏️ Project updated successfully!");
+    } catch {
+      setErrorMessage("❌ Failed to update project");
+    }
+  }
+
+  if (selectedProjectId) {
+    return (
+      <ProjectDetail
+        projectId={selectedProjectId}
+        onBack={() => setSelectedProjectId(null)}
+      />
+    );
+  }
 
   return (
-    <div style={{ padding: "2rem" }}>
-      <h1 className="text-3xl font-bold mb-4">Projects</h1>
+    <div className="p-6 max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">📂 Projects</h1>
 
-      {/* Project Form */}
-      <form onSubmit={handleSubmit} className="mb-4 flex flex-col gap-3">
+      {/* Success/Error Messages */}
+      {successMessage && (
+        <div className="bg-green-100 text-green-800 p-2 mb-3 rounded">
+          {successMessage}
+        </div>
+      )}
+      {errorMessage && (
+        <div className="bg-red-100 text-red-800 p-2 mb-3 rounded">
+          {errorMessage}
+        </div>
+      )}
+
+      {/* Create Project Form */}
+      <form onSubmit={handleCreate} className="mb-6 space-y-2 border p-4 rounded">
+        <h2 className="text-lg font-semibold">➕ Create New Project</h2>
         <input
-          ref={titleInputRef}
-          placeholder="Title"
-          value={form.title}
-          onChange={(e) => setForm({ ...form, title: e.target.value })}
-          className="border rounded px-3 py-2"
-          disabled={loading}
+          name="title"
+          placeholder="Project Title"
+          required
+          className="w-full border p-2 rounded"
         />
         <input
-          placeholder="Description"
-          value={form.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
-          className="border rounded px-3 py-2"
-          disabled={loading}
+          name="description"
+          placeholder="Project Description"
+          required
+          className="w-full border p-2 rounded"
         />
         <input
-          placeholder="Goals"
-          value={form.goals}
-          onChange={(e) => setForm({ ...form, goals: e.target.value })}
-          className="border rounded px-3 py-2"
-          disabled={loading}
+          name="goals"
+          placeholder="Project Goals"
+          required
+          className="w-full border p-2 rounded"
         />
         <button
           type="submit"
+          className="bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50"
           disabled={loading}
-          className={`flex justify-center items-center gap-2 ${
-            loading ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"
-          } text-white py-2 px-4 rounded transition`}
         >
-          {loading ? <Spinner /> : editingId ? "Update Project" : "Create Project"}
+          {loading ? "Creating..." : "Create Project"}
         </button>
       </form>
 
-      {/* Success + Error Messages */}
-      {successMessage && (
-        <div className="mb-4 text-green-600 font-medium">{successMessage}</div>
-      )}
-      {errorMessage && (
-        <div className="mb-4 text-red-600 font-medium">{errorMessage}</div>
+      {/* Empty State */}
+      {projects.length === 0 && !loading && (
+        <p className="text-gray-500 italic">No projects yet. Create one above 👆</p>
       )}
 
-      {/* Loading State for Projects */}
-      {loadingProjects ? (
-        <div className="flex flex-col items-center gap-2 text-gray-500">
-          <Spinner />
-          <div>Loading projects...</div>
-        </div>
-      ) : projects.length === 0 ? (
-        /* Empty State Handling */
-        <div className="flex flex-col items-center justify-center py-20 text-center border rounded-lg shadow-sm">
-          <div className="text-2xl font-semibold mb-2">📂 No projects yet</div>
-          <div className="text-gray-500 mb-6">
-            Start by creating your first one.
-          </div>
-          <button
-            onClick={() => {
-              setForm({ title: "", description: "", goals: "" });
-              titleInputRef.current?.focus();
-            }}
-            className="px-6 py-2 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
-          >
-            Create Project
-          </button>
-        </div>
-      ) : (
-        /* Project List */
-        <ul className="space-y-3">
-          {projects.map((p) => (
-            <li
-              key={p.id}
-              className="p-4 border rounded-lg shadow-sm flex justify-between items-center"
-            >
-              <div>
-                <strong>{p.title}</strong>: {p.description} ({p.goals})
+      {/* Project List */}
+      <ul className="space-y-2">
+        {projects.map((p) => (
+          <li key={p.id} className="border p-3 rounded">
+            {editingProjectId === p.id ? (
+              <form
+                onSubmit={(e) => handleUpdate(e, p.id)}
+                className="space-y-2"
+              >
+                <input
+                  name="title"
+                  defaultValue={p.title}
+                  className="w-full border p-2 rounded"
+                />
+                <input
+                  name="description"
+                  defaultValue={p.description}
+                  className="w-full border p-2 rounded"
+                />
+                <input
+                  name="goals"
+                  defaultValue={p.goals}
+                  className="w-full border p-2 rounded"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    className="bg-blue-600 text-white px-3 py-1 rounded"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingProjectId(null)}
+                    className="bg-gray-500 text-white px-3 py-1 rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="font-medium">{p.title}</p>
+                  <p className="text-sm text-gray-600">{p.description}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSelectedProjectId(p.id)}
+                    className="bg-blue-600 text-white px-3 py-1 rounded"
+                  >
+                    View
+                  </button>
+                  <button
+                    onClick={() => setEditingProjectId(p.id)}
+                    className="bg-yellow-600 text-white px-3 py-1 rounded"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(p.id)}
+                    className="bg-red-600 text-white px-3 py-1 rounded"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-              <div className="space-x-2">
-                <button
-                  onClick={() => handleEdit(p)}
-                  disabled={loading}
-                  className="px-3 py-1 bg-yellow-400 text-black rounded hover:bg-yellow-500 disabled:opacity-50"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDelete(p.id)}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-                >
-                  {loading ? <Spinner /> : "Delete"}
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
