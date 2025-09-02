@@ -26,3 +26,11 @@ dist-ssr
 __pycache__/
 *.pyc
 .env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Env files
+.env
+
