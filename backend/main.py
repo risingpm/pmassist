@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from .database import Base, engine, SessionLocal, get_db
-
+from backend.knowledge import documents, search
 from .database import Base, engine, SessionLocal
 from .models import Project
 from . import roadmap   # 👈 NEW: import roadmap endpoints
@@ -130,3 +130,11 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
 # Include Roadmap Router
 # -----------------------------
 app.include_router(roadmap.router)
+
+app.include_router(documents.router)
+app.include_router(search.router)
+
+from backend.knowledge import documents, roadmap_ai
+
+app.include_router(documents.router)
+app.include_router(roadmap_ai.router)
