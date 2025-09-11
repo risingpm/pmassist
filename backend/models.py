@@ -1,7 +1,8 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.types import UserDefinedType
+from sqlalchemy.orm import relationship
 import uuid
 
 from .database import Base
@@ -31,6 +32,11 @@ class Project(Base):
     description = Column(String)
     goals = Column(String)
 
+    # Relationships
+    roadmaps = relationship("Roadmap", back_populates="project", cascade="all, delete-orphan")
+    prds = relationship("PRD", back_populates="project", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
+
 
 # ✅ Roadmap Model
 class Roadmap(Base):
@@ -41,6 +47,25 @@ class Roadmap(Base):
     content = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True)
+
+    # Relationship
+    project = relationship("Project", back_populates="roadmaps")
+
+
+# ✅ PRD Model
+class PRD(Base):
+    __tablename__ = "prds"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    content = Column(JSONB, nullable=False)  # store PRD as structured JSON
+    version = Column(Integer, default=1)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationship
+    project = relationship("Project", back_populates="prds")
 
 
 # ✅ Document Model
@@ -54,3 +79,6 @@ class Document(Base):
     content = Column(String, nullable=False)
     embedding = Column(Vector)  # pgvector column
     uploaded_at = Column(DateTime, server_default=func.now())
+
+    # Relationship
+    project = relationship("Project", back_populates="documents")

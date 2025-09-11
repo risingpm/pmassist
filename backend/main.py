@@ -7,6 +7,7 @@ from backend.knowledge import documents, search
 from .database import Base, engine, SessionLocal
 from .models import Project
 from . import roadmap   # 👈 NEW: import roadmap endpoints
+from . import prd
 
 # Create tables if they don’t already exist
 Base.metadata.create_all(bind=engine)
@@ -138,3 +139,5 @@ from backend.knowledge import documents, roadmap_ai
 
 app.include_router(documents.router)
 app.include_router(roadmap_ai.router)
+
+app.include_router(prd.router)
