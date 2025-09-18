@@ -52,13 +52,21 @@ class Roadmap(Base):
     project = relationship("Project", back_populates="roadmaps")
 
 
-# ✅ PRD Model
+# ✅ PRD Model (updated with explicit fields)
 class PRD(Base):
     __tablename__ = "prds"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    content = Column(JSONB, nullable=False)  # store PRD as structured JSON
+
+    # 🔹 NEW: store full Markdown PRD as plain text
+    content = Column(String, nullable=True)  
+
+    # (Optional) keep structured fields for backward compatibility
+    description = Column(String, nullable=True)
+    goals = Column(String, nullable=True)
+    feature_name = Column(String, nullable=True)
+
     version = Column(Integer, default=1)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -66,6 +74,8 @@ class PRD(Base):
 
     # Relationship
     project = relationship("Project", back_populates="prds")
+
+
 
 
 # ✅ Document Model

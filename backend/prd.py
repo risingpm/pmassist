@@ -7,7 +7,6 @@ from . import models, schemas
 
 from openai import OpenAI
 import os
-import json
 
 from fastapi.responses import FileResponse
 from docx import Document as DocxDocument
@@ -27,7 +26,7 @@ router = APIRouter(
 )
 
 # ---------------------------------------------------------
-# ✅ Generate a new PRD
+# ✅ Generate a new PRD (Markdown only)
 # ---------------------------------------------------------
 @router.post("/{project_id}/prd", response_model=schemas.PRDResponse)
 def generate_prd(project_id: str, prd_data: schemas.PRDCreate, db: Session = Depends(get_db)):
@@ -37,54 +36,50 @@ def generate_prd(project_id: str, prd_data: schemas.PRDCreate, db: Session = Dep
 
     # 🔹 Collect existing features
     features = []
-    roadmaps = db.query(models.Roadmap).filter(models.Roadmap.project_id == project_id).all()
-    if roadmaps:
+    if db.query(models.Roadmap).filter(models.Roadmap.project_id == project_id).first():
         features.append("Roadmap generation already available")
-    docs = db.query(models.Document).filter(models.Document.project_id == project_id).all()
-    if docs:
+    if db.query(models.Document).filter(models.Document.project_id == project_id).first():
         features.append("Knowledge documents available for embedding")
 
-    # 🔹 Build AI prompt
+    # Build AI prompt
     prompt = f"""
-    Generate a structured Product Requirements Document (PRD) in JSON format.
-    Project Title: {project.title}
-    Description: {project.description}
-    Goals: {project.goals}
+Generate a Product Requirements Document (PRD) in **Markdown** format.
+Always use Markdown headers, lists, and bullet points.
+Include these sections:
+- Objective
+- Scope
+- Success Metrics
+- Engineering Requirements
+- Future Work
 
-    Existing Features: {features}
+Project Title: {project.title}
+Description: {project.description}
+Goals: {project.goals}
 
-    {prd_data.prompt or ""}
+Existing Features: {features}
 
-    Structure the PRD with these fields:
-    - objective
-    - scope
-    - success_metrics
-    - engineering_requirements
-    - future_work
-    """
+{prd_data.prompt or ""}
+"""
 
-    # 🔹 Call OpenAI with JSON response mode
+    # Call OpenAI, expect raw Markdown text
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are an assistant that generates PRDs strictly in valid JSON format."},
+            {"role": "system", "content": "You are an assistant that generates PRDs strictly in clean Markdown format."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.4,
-        response_format={"type": "json_object"},
     )
 
     raw_content = response.choices[0].message.content
 
-    try:
-        prd_json = json.loads(raw_content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse PRD JSON: {str(e)} | Raw: {raw_content[:200]}")
-
-    # 🔹 Save PRD
+    # 🔹 Save PRD as Markdown string
     new_prd = models.PRD(
         project_id=project_id,
-        content=prd_json,
+        feature_name=prd_data.feature_name,
+        description="Markdown PRD",
+        goals=None,
+        content=raw_content,   # Store full Markdown
         version=1,
         is_active=True,
     )
@@ -96,7 +91,7 @@ def generate_prd(project_id: str, prd_data: schemas.PRDCreate, db: Session = Dep
 
 
 # ---------------------------------------------------------
-# ✅ Refine an existing PRD
+# ✅ Refine an existing PRD (still JSON-based)
 # ---------------------------------------------------------
 @router.put("/prds/{prd_id}/refine", response_model=schemas.PRDResponse)
 def refine_prd(prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depends(get_db)):
@@ -107,7 +102,10 @@ def refine_prd(prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depen
     # 🔹 Build AI prompt
     prompt = f"""
     Here is the current PRD in JSON format:
-    {json.dumps(prd.content, indent=2)}
+    {{
+      "objective": "{prd.description}",
+      "success_metrics": "{prd.goals}"
+    }}
 
     User feedback for refinement:
     {refine_data.instructions}
@@ -116,7 +114,6 @@ def refine_prd(prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depen
     applying the requested refinements while keeping everything else consistent.
     """
 
-    # 🔹 Call OpenAI with JSON response mode
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -126,19 +123,20 @@ def refine_prd(prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depen
         temperature=0.4,
         response_format={"type": "json_object"},
     )
-
     raw_content = response.choices[0].message.content
 
     try:
         refined_json = json.loads(raw_content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse refined PRD JSON: {str(e)} | Raw: {raw_content[:200]}")
+    except Exception:
+        refined_json = {"objective": "Refined PRD (fallback)", "raw_content": raw_content}
 
     # 🔹 Save as a new PRD version
     new_version = prd.version + 1
     refined_prd = models.PRD(
         project_id=prd.project_id,
-        content=refined_json,
+        feature_name=prd.feature_name,
+        description=refined_json.get("objective"),
+        goals=", ".join(refined_json.get("success_metrics", [])) if refined_json.get("success_metrics") else None,
         version=new_version,
         is_active=True,
     )
@@ -190,18 +188,20 @@ def export_prd(prd_id: UUID, db: Session = Depends(get_db)):
     doc = DocxDocument()
     doc.add_heading("Product Requirements Document (PRD)", level=0)
 
-    # Add sections from PRD content
-    content = prd.content
-    for section, value in content.items():
-        doc.add_heading(section.replace("_", " ").title(), level=1)
-        if isinstance(value, list):
-            for item in value:
-                doc.add_paragraph(f"- {item}")
-        elif isinstance(value, dict):
-            for k, v in value.items():
-                doc.add_paragraph(f"{k}: {v}")
-        else:
-            doc.add_paragraph(str(value))
+    # Add sections
+    doc.add_heading("Feature Name", level=1)
+    doc.add_paragraph(prd.feature_name or "")
+
+    doc.add_heading("Objective", level=1)
+    doc.add_paragraph(prd.description or "")
+
+    doc.add_heading("Goals", level=1)
+    doc.add_paragraph(prd.goals or "")
+
+    # Add full Markdown as plain text
+    if hasattr(prd, "content") and prd.content:
+        doc.add_heading("Full Markdown PRD", level=1)
+        doc.add_paragraph(prd.content)
 
     # Save to temp file
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")

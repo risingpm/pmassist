@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPRD, getPRDs, refinePRD, exportPRD } from "../api";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface PRD {
   id: string;
@@ -94,90 +96,22 @@ export default function PRDTab({ projectId }: { projectId: string }) {
   };
 
   // ✅ safe rendering
-  function renderPRDContent(content: any) {
-    if (!content || typeof content !== "object") {
-      return <pre>{String(content)}</pre>;
-    }
 
-    return (
-      <div className="space-y-4">
-        {content.objective && (
-          <div>
-            <h4 className="font-semibold text-lg mb-1">🎯 Objective</h4>
-            <p className="text-gray-700">{String(content.objective)}</p>
-          </div>
-        )}
 
-        {content.scope && (
-          <div>
-            <h4 className="font-semibold text-lg mb-1">📦 Scope</h4>
-            {Array.isArray(content.scope.in_scope) && (
-              <>
-                <p className="font-medium">✅ In Scope:</p>
-                <ul className="list-disc ml-6 text-gray-700">
-                  {content.scope.in_scope.map((item: any, i: number) => (
-                    <li key={i}>{String(item)}</li>
-                  ))}
-                </ul>
-              </>
-            )}
-            {Array.isArray(content.scope.out_of_scope) && (
-              <>
-                <p className="font-medium mt-2">❌ Out of Scope:</p>
-                <ul className="list-disc ml-6 text-gray-700">
-                  {content.scope.out_of_scope.map((item: any, i: number) => (
-                    <li key={i}>{String(item)}</li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </div>
-        )}
+function renderPRDContent(content: any) {
+  if (!content) return null;
 
-        {content.success_metrics && typeof content.success_metrics === "object" && (
-          <div>
-            <h4 className="font-semibold text-lg mb-1">📊 Success Metrics</h4>
-            <ul className="list-disc ml-6 text-gray-700">
-              {Object.entries(content.success_metrics).map(([k, v], i) => (
-                <li key={i}>
-                  <span className="font-medium">{k}:</span> {String(v)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+  return (
+    <div className="prose max-w-none">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {typeof content === "string"
+          ? content
+          : JSON.stringify(content, null, 2)}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
-        {content.engineering_requirements && (
-          <div>
-            <h4 className="font-semibold text-lg mb-1">🛠️ Engineering Requirements</h4>
-            {typeof content.engineering_requirements === "object" ? (
-              <ul className="list-disc ml-6 text-gray-700">
-                {Object.entries(content.engineering_requirements).map(([k, v], i) => (
-                  <li key={i}>
-                    <span className="font-medium">{k}:</span>{" "}
-                    {Array.isArray(v) ? v.join(", ") : String(v)}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-gray-700">{String(content.engineering_requirements)}</p>
-            )}
-          </div>
-        )}
-
-        {Array.isArray(content.future_work) && (
-          <div>
-            <h4 className="font-semibold text-lg mb-1">🚀 Future Work</h4>
-            <ul className="list-disc ml-6 text-gray-700">
-              {content.future_work.map((item: any, i: number) => (
-                <li key={i}>{String(item)}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="p-4">

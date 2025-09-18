@@ -4,28 +4,30 @@ from datetime import datetime
 from uuid import UUID
 
 
-# ✅ Schema for creating the first PRD
 class PRDCreate(BaseModel):
+    feature_name: str | None = None
     prompt: str | None = None  # optional extra user guidance
 
 
-# ✅ Schema for refining an existing PRD
 class PRDRefine(BaseModel):
     instructions: str  # user feedback for refinement
 
 
-# ✅ Schema for returning PRD details
 class PRDResponse(BaseModel):
     id: UUID
     project_id: str
-    content: Any
+    feature_name: str | None = None
+    description: str | None = None
+    goals: str | None = None
+    content: str | None = None   # full Markdown PRD
     version: int
     is_active: bool
     created_at: datetime
     updated_at: datetime
 
     class Config:
-        from_attributes = True  # ✅ replaces orm_mode in Pydantic v2
+        from_attributes = True
+
 
 
 class DocumentResponse(BaseModel):
