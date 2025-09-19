@@ -99,18 +99,16 @@ export default function PRDTab({ projectId }: { projectId: string }) {
 
 
 function renderPRDContent(content: any) {
-  if (!content) return null;
+  if (!content) return <p>No PRD content available.</p>;
 
+  // Treat content as Markdown string
   return (
     <div className="prose max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {typeof content === "string"
-          ? content
-          : JSON.stringify(content, null, 2)}
-      </ReactMarkdown>
+      <ReactMarkdown>{String(content)}</ReactMarkdown>
     </div>
   );
 }
+
 
 
   return (
