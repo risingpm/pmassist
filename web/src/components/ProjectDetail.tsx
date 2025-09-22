@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import PRDTab from "./PRD"; // ✅ new import
-import { createPRD, getPRDs, refinePRD, exportPRD } from "../api"; // ensures API is available
+import PRDList from "./PRDList";
+import PRDDetail from "./PRDDetail";
 
 type Document = {
   id: string;
@@ -32,13 +32,15 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
   const [roadmapData, setRoadmapData] = useState<RoadmapResponse | null>(null);
   const [roadmapLoading, setRoadmapLoading] = useState(false);
 
-  // ✅ NEW: Tab state
   const [activeTab, setActiveTab] = useState<"documents" | "roadmap" | "prd">("documents");
+  const [selectedPrdId, setSelectedPrdId] = useState<string | null>(null);
 
-  // ---- DOCUMENTS ----
+  // --- Document handlers ---
   const fetchDocuments = async () => {
+    console.log("Fetching documents for project", projectId);
     const res = await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}`);
     const data = await res.json();
+    console.log("Documents response:", data);
     setDocuments(data);
   };
 
@@ -75,7 +77,7 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
     await fetchDocuments();
   };
 
-  // ---- ROADMAP ----
+  // --- Roadmap handlers ---
   const fetchRoadmap = async () => {
     const res = await fetch(`${import.meta.env.VITE_API_BASE}/roadmap-ai/${projectId}`);
     const data = await res.json();
@@ -102,13 +104,13 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
     setRoadmapLoading(false);
   };
 
-  // ---- EFFECT ----
+  // --- Lifecycle ---
   useEffect(() => {
     fetchDocuments();
     fetchRoadmap();
   }, [projectId]);
 
-  // ---- UI ----
+  // --- UI ---
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Back Button */}
@@ -116,95 +118,71 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
         onClick={onBack}
         className="mb-4 px-4 py-2 bg-gray-600 text-white rounded"
       >
-        🔙 Back to Projects
+        ⬅ Back to Projects
       </button>
 
       {/* Tabs */}
       <div className="flex gap-4 mb-6 border-b">
         <button
-          className={`px-4 py-2 ${
-            activeTab === "documents" ? "border-b-2 border-blue-600 font-semibold" : ""
-          }`}
+          className={`px-4 py-2 ${activeTab === "documents" ? "border-b-2 border-blue-600 font-semibold" : ""}`}
           onClick={() => setActiveTab("documents")}
         >
           📄 Documents
         </button>
         <button
-          className={`px-4 py-2 ${
-            activeTab === "roadmap" ? "border-b-2 border-blue-600 font-semibold" : ""
-          }`}
+          className={`px-4 py-2 ${activeTab === "roadmap" ? "border-b-2 border-blue-600 font-semibold" : ""}`}
           onClick={() => setActiveTab("roadmap")}
         >
-          🛣️ Roadmap
+          🛠 Roadmap
         </button>
         <button
-          className={`px-4 py-2 ${
-            activeTab === "prd" ? "border-b-2 border-blue-600 font-semibold" : ""
-          }`}
+          className={`px-4 py-2 ${activeTab === "prd" ? "border-b-2 border-blue-600 font-semibold" : ""}`}
           onClick={() => setActiveTab("prd")}
         >
-          📑 PRD
+          📑 PRDs
         </button>
       </div>
 
       {/* Tab Content */}
       {activeTab === "documents" && (
-        <>
+        <div>
           <h1 className="text-2xl font-bold mb-6">📄 Project Documents</h1>
-          {/* Document Upload + List */}
-          <div className="flex gap-2 mb-4">
-            <input
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="border p-2 rounded w-full"
-            />
+
+          {/* Upload + Embed */}
+          <div className="flex items-center gap-2 mb-4">
+            <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
             <button
               onClick={handleUpload}
-              disabled={loading || !file}
-              className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
             >
               {loading ? "Uploading..." : "Upload"}
             </button>
+            <button
+              onClick={handleEmbed}
+              disabled={loading}
+              className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
+            >
+              Embed
+            </button>
           </div>
 
-          <button
-            onClick={handleEmbed}
-            disabled={loading}
-            className="bg-green-600 text-white px-4 py-2 rounded mb-6 disabled:opacity-50"
-          >
-            {loading ? "Processing..." : "Generate Embeddings"}
-          </button>
-
+          {/* Document List (grouped by filename) */}
           {documents.length === 0 ? (
-            <p className="text-gray-500 italic">No documents uploaded yet.</p>
+            <p className="text-gray-500">No documents uploaded.</p>
           ) : (
             <ul className="space-y-2">
-              {documents.map((doc) => (
-                <li
-                  key={doc.id}
-                  className="border p-3 rounded bg-gray-50 flex justify-between items-center"
-                >
+              {[...new Map(documents.map((d) => [d.filename, d])).values()].map((doc) => (
+                <li key={doc.id} className="flex justify-between items-center p-2 border rounded">
                   <div>
-                    <p className="font-medium">
-                      {doc.filename} (chunk {doc.chunk_index})
-                    </p>
-                    <p className="text-sm text-gray-600">
+                    <p className="font-medium">{doc.filename}</p>
+                    <p className="text-sm text-gray-500">
                       Uploaded: {new Date(doc.uploaded_at).toLocaleString()}
-                    </p>
-                    <p className="text-sm">
-                      Embedding:{" "}
-                      <span
-                        className={
-                          doc.has_embedding ? "text-green-600" : "text-red-600"
-                        }
-                      >
-                        {doc.has_embedding ? "✅ Yes" : "❌ No"}
-                      </span>
                     </p>
                   </div>
                   <button
                     onClick={() => handleDelete(doc.id)}
-                    className="bg-red-600 text-white px-3 py-1 rounded"
+                    className="px-2 py-1 bg-red-500 text-white rounded"
                   >
                     Delete
                   </button>
@@ -212,70 +190,56 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
               ))}
             </ul>
           )}
-        </>
+        </div>
       )}
 
       {activeTab === "roadmap" && (
-        <>
-          <h1 className="text-2xl font-bold mb-6">🛣️ AI Roadmap</h1>
+        <div>
+          <h1 className="text-2xl font-bold mb-6">🛠 AI Roadmap</h1>
+
           <button
             onClick={handleGenerateRoadmap}
             disabled={roadmapLoading}
-            className="bg-purple-600 text-white px-4 py-2 rounded mb-6 disabled:opacity-50"
+            className="mb-4 px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
           >
-            {roadmapLoading ? "Regenerating..." : "Generate / Regenerate AI Roadmap"}
+            {roadmapLoading ? "Generating..." : "Generate Roadmap"}
           </button>
 
-          {roadmapData && (
-            <div className="border p-4 rounded bg-gray-50">
-              <p className="text-sm text-gray-500">
-                Last generated: {new Date(roadmapData.created_at).toLocaleString()}
-              </p>
-              <h2 className="text-lg font-semibold mt-4">✨ Existing Features</h2>
-              {Object.keys(roadmapData.roadmap.existing_features).length === 0 ? (
-                <p className="text-gray-500 italic">No features found.</p>
-              ) : (
-                <ul className="list-disc ml-6 text-sm text-gray-700">
-                  {Object.entries(roadmapData.roadmap.existing_features).map(
-                    ([category, features]) => (
-                      <li key={category}>
-                        <p className="font-medium">{category}</p>
-                        <ul className="ml-4 list-disc">
-                          {features.map((f, i) => (
-                            <li key={i}>{f}</li>
-                          ))}
-                        </ul>
-                      </li>
-                    )
-                  )}
-                </ul>
-              )}
-
-              <h2 className="text-lg font-semibold mt-4">🛠️ Roadmap Phases</h2>
-              {roadmapData.roadmap.roadmap.length === 0 ? (
-                <p className="text-gray-500 italic">No roadmap phases generated.</p>
-              ) : (
-                <ul className="list-disc ml-6 text-sm text-gray-700">
-                  {roadmapData.roadmap.roadmap.map((phase, i) => (
-                    <li key={i}>
-                      <p className="font-medium">{phase.phase}</p>
-                      <ul className="ml-4 list-disc">
-                        {phase.items.map((item, j) => (
-                          <li key={j}>{item}</li>
-                        ))}
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
-              )}
+          {roadmapData ? (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold">Phases</h2>
+              {roadmapData.roadmap.roadmap.map((phase, idx) => (
+                <div key={idx} className="p-2 border rounded">
+                  <h3 className="font-bold">{phase.phase}</h3>
+                  <ul className="list-disc list-inside">
+                    {phase.items.map((item, i) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
+          ) : (
+            <p className="text-gray-500">No roadmap yet. Generate one above.</p>
           )}
-        </>
+        </div>
       )}
 
       {activeTab === "prd" && (
         <>
-          <PRDTab projectId={projectId} />
+          {!selectedPrdId ? (
+            <PRDList
+              projectId={projectId}
+              onSelectPrd={(id) => setSelectedPrdId(id)}
+              onBack={() => setActiveTab("documents")}
+            />
+          ) : (
+            <PRDDetail
+              projectId={projectId}
+              prdId={selectedPrdId}
+              onBack={() => setSelectedPrdId(null)}
+            />
+          )}
         </>
       )}
     </div>
