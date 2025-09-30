@@ -38,9 +38,9 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
     if (!refineText.trim()) return;
     setLoading(true);
     try {
-      await refinePrd(projectId, prdId, refineText); // ✅ fixed
-      const updated = await getPrd(projectId, prdId); // ✅ fixed
-      setPrd(updated);
+      const newContent = await refinePrd(projectId, prdId, refineText);
+      setPrd((prev: any) => ({ ...prev, content: newContent }));
+      
       setRefineText("");
     } catch (err) {
       console.error("Failed to refine PRD:", err);
