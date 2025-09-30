@@ -32,16 +32,18 @@ def generate_prd(project_id: str, prd_data: schemas.PRDCreate, db: Session = Dep
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 🔹 Collect existing features
-    features = []
-    if db.query(models.Roadmap).filter(models.Roadmap.project_id == project_id).first():
-        features.append("Roadmap generation already available")
-    if db.query(models.Document).filter(models.Document.project_id == project_id).first():
-        features.append("Knowledge documents available for embedding")
+    # 1. Collect previous PRDs for context
+    previous_prds = db.query(models.PRD).filter(models.PRD.project_id == project_id).all()
+    previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
 
-    # Build AI prompt
+    # 2. Collect uploaded documents for context
+    docs = db.query(models.Document).filter(models.Document.project_id == project_id).all()
+    docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
+
+    # 3. Build enriched prompt
     prompt = f"""
 Generate a Product Requirements Document (PRD) in **Markdown** format.
+
 Always use Markdown headers, lists, and bullet points.
 Include these sections:
 - Objective
@@ -54,16 +56,21 @@ Project Title: {project.title}
 Description: {project.description}
 Goals: {project.goals}
 
-Existing Features: {features}
+Uploaded Documents:
+{docs_text}
 
-{prd_data.prompt or ""}
+Previous PRDs:
+{previous_prds_text}
+
+Task: Generate a PRD for feature: {prd_data.feature_name}
+User instructions: {prd_data.prompt}
 """
 
-    # Call OpenAI, expect raw Markdown text
+    # 4. Call OpenAI
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are an assistant that generates PRDs strictly in clean Markdown format."},
+            {"role": "system", "content": "You are an expert product manager who writes PRDs."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.4,
@@ -71,12 +78,12 @@ Existing Features: {features}
 
     raw_content = response.choices[0].message.content
 
-    # 🔹 Save PRD as Markdown string
+    # 5. Save PRD in DB
     new_prd = models.PRD(
         project_id=project_id,
         feature_name=prd_data.feature_name,
-        description="Markdown PRD",
-        goals=None,
+        description=prd_data.prompt,
+        goals=project.goals,
         content=raw_content,
         version=1,
         is_active=True,
