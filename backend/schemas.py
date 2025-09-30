@@ -8,8 +8,8 @@ from uuid import UUID
 # ---------------------------------------------------------
 
 class PRDCreate(BaseModel):
-    feature_name: Optional[str] = None     # Optional feature name
-    prompt: Optional[str] = None           # Optional user prompt
+    feature_name: str     # Optional feature name
+    prompt: str           # Optional user prompt
 
     class Config:
         extra = "ignore"  # Ignore extra/missing fields so `{}` works

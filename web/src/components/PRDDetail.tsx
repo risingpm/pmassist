@@ -19,7 +19,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
     const fetchPrd = async () => {
       setLoading(true);
       try {
-        const data = await getPrd(projectId, prdId); // ✅ fixed to include projectId
+        const data = await getPrd(projectId, prdId);
         setPrd(data);
         setError(null);
       } catch (err) {
@@ -38,10 +38,14 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
     if (!refineText.trim()) return;
     setLoading(true);
     try {
+      // ✅ Pass both projectId + prdId, return Markdown string
       const newContent = await refinePrd(projectId, prdId, refineText);
-      setPrd((prev: any) => ({ ...prev, content: newContent }));
-      
+
+      // ✅ Update only the content field, keep rest of PRD intact
+      setPrd((prev: any) => (prev ? { ...prev, content: newContent } : prev));
+
       setRefineText("");
+      setError(null);
     } catch (err) {
       console.error("Failed to refine PRD:", err);
       setError("⚠️ Failed to refine PRD");
@@ -53,7 +57,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
   // Handle export
   const handleExport = async () => {
     try {
-      await exportPrd(projectId, prdId); // ✅ fixed
+      await exportPrd(projectId, prdId);
     } catch (err) {
       console.error("Failed to export PRD:", err);
       setError("⚠️ Failed to export PRD");

@@ -79,15 +79,17 @@ export async function getPrd(projectId: string, prdId: string) {
   return res.json();
 }
 
-export async function refinePrd(prdId: string, instructions: string) {
-  const res = await fetch(`${API_BASE}/projects/prds/${prdId}/refine`, {
+export async function refinePrd(projectId: string, prdId: string, instructions: string) {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}/refine`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ instructions }),
+    body: JSON.stringify({ instructions })
   });
   if (!res.ok) throw new Error("Failed to refine PRD");
-  return res.json();
+  const data = await res.json();
+  return data.content;
 }
+
 
 export async function exportPrd(prdId: string) {
   const res = await fetch(`${API_BASE}/projects/prds/${prdId}/export`);
