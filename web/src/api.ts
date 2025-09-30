@@ -1,6 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
-// -------------------- Projects --------------------
+// ---------------- Projects ----------------
 export async function getProjects() {
   const res = await fetch(`${API_BASE}/projects`);
   if (!res.ok) throw new Error("Failed to fetch projects");
@@ -41,7 +41,7 @@ export async function deleteProject(id: string) {
   return res.json();
 }
 
-// -------------------- Roadmap --------------------
+// ---------------- Roadmap ----------------
 export async function generateRoadmap(projectId: string) {
   const res = await fetch(`${API_BASE}/roadmap-ai/${projectId}`, {
     method: "POST",
@@ -56,12 +56,12 @@ export async function getRoadmap(projectId: string) {
   return res.json();
 }
 
-// -------------------- PRDs --------------------
-export async function createPrd(projectId: string) {
+// ---------------- PRDs ----------------
+export async function createPrd(projectId: string, body: { feature_name: string; prompt: string }) {
   const res = await fetch(`${API_BASE}/projects/${projectId}/prd`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({})
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error("Failed to create PRD");
   return res.json();
@@ -83,7 +83,7 @@ export async function refinePrd(prdId: string, instructions: string) {
   const res = await fetch(`${API_BASE}/projects/prds/${prdId}/refine`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ instructions })
+    body: JSON.stringify({ instructions }),
   });
   if (!res.ok) throw new Error("Failed to refine PRD");
   return res.json();
