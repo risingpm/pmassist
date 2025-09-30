@@ -19,7 +19,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
     const fetchPrd = async () => {
       setLoading(true);
       try {
-        const data = await getPrd(projectId, prdId);
+        const data = await getPrd(projectId, prdId); // ✅ fixed to include projectId
         setPrd(data);
         setError(null);
       } catch (err) {
@@ -38,8 +38,8 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
     if (!refineText.trim()) return;
     setLoading(true);
     try {
-      await refinePrd(prdId, refineText);
-      const updated = await getPrd(projectId, prdId);
+      await refinePrd(projectId, prdId, refineText); // ✅ fixed
+      const updated = await getPrd(projectId, prdId); // ✅ fixed
       setPrd(updated);
       setRefineText("");
     } catch (err) {
@@ -53,7 +53,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
   // Handle export
   const handleExport = async () => {
     try {
-      await exportPrd(prdId);
+      await exportPrd(projectId, prdId); // ✅ fixed
     } catch (err) {
       console.error("Failed to export PRD:", err);
       setError("⚠️ Failed to export PRD");
@@ -75,9 +75,11 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
 
       {prd ? (
         <div>
-          <h1 className="text-2xl font-bold mb-4">{prd.title || "PRD Detail"}</h1>
+          <h1 className="text-2xl font-bold mb-4">
+            {prd.feature_name || "PRD Detail"}
+          </h1>
 
-          {/* PRD Content */}
+          {/* PRD Content (Markdown) */}
           <div className="p-4 border rounded bg-gray-50 mb-6">
             <ReactMarkdown>{prd.content || ""}</ReactMarkdown>
           </div>
@@ -105,7 +107,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
             onClick={handleExport}
             className="px-4 py-2 bg-blue-600 text-white rounded"
           >
-            ⬇ Export PRD
+            📤 Export PRD
           </button>
         </div>
       ) : (

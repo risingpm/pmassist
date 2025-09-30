@@ -1,17 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from uuid import UUID
-
+import json
 from .database import get_db
 from . import models, schemas
 
 from openai import OpenAI
 import os
-
 from fastapi.responses import FileResponse
 from docx import Document as DocxDocument
 import tempfile
-
 from dotenv import load_dotenv
 
 # ✅ Load environment variables
@@ -79,7 +77,7 @@ Existing Features: {features}
         feature_name=prd_data.feature_name,
         description="Markdown PRD",
         goals=None,
-        content=raw_content,   # Store full Markdown
+        content=raw_content,
         version=1,
         is_active=True,
     )
@@ -91,52 +89,45 @@ Existing Features: {features}
 
 
 # ---------------------------------------------------------
-# ✅ Refine an existing PRD (still JSON-based)
+# ✅ Refine an existing PRD
 # ---------------------------------------------------------
-@router.put("/prds/{prd_id}/refine", response_model=schemas.PRDResponse)
-def refine_prd(prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depends(get_db)):
-    prd = db.query(models.PRD).filter(models.PRD.id == prd_id).first()
+@router.put("/{project_id}/prds/{prd_id}/refine", response_model=schemas.PRDResponse)
+def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depends(get_db)):
+    prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
 
     # 🔹 Build AI prompt
     prompt = f"""
-    Here is the current PRD in JSON format:
-    {{
-      "objective": "{prd.description}",
-      "success_metrics": "{prd.goals}"
-    }}
+Here is the current PRD:
+{prd.content or ''}
 
-    User feedback for refinement:
-    {refine_data.instructions}
+User feedback for refinement:
+{refine_data.instructions}
 
-    Please return an updated PRD in the same JSON structure,
-    applying the requested refinements while keeping everything else consistent.
-    """
+Please return an updated PRD in clean Markdown format,
+applying the requested refinements while keeping everything else consistent.
+"""
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are an assistant that refines PRDs strictly in valid JSON format."},
+            {"role": "system", "content": "You are an assistant that refines PRDs strictly in clean Markdown format."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.4,
-        response_format={"type": "json_object"},
     )
-    raw_content = response.choices[0].message.content
 
-    try:
-        refined_json = json.loads(raw_content)
-    except Exception:
-        refined_json = {"objective": "Refined PRD (fallback)", "raw_content": raw_content}
+    refined_content = response.choices[0].message.content
 
     # 🔹 Save as a new PRD version
     new_version = prd.version + 1
     refined_prd = models.PRD(
-        project_id=prd.project_id,
+        project_id=project_id,
         feature_name=prd.feature_name,
-        description=refined_json.get("objective"),
-        goals=", ".join(refined_json.get("success_metrics", [])) if refined_json.get("success_metrics") else None,
+        description=prd.description,
+        goals=prd.goals,
+        content=refined_content,
         version=new_version,
         is_active=True,
     )
@@ -160,6 +151,17 @@ def list_prds(project_id: str, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------
+# ✅ Get a specific PRD by ID
+# ---------------------------------------------------------
+@router.get("/{project_id}/prds/{prd_id}", response_model=schemas.PRDResponse)
+def get_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
+    prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
+    if not prd:
+        raise HTTPException(status_code=404, detail="PRD not found")
+    return prd
+
+
+# ---------------------------------------------------------
 # ✅ Get the active PRD
 # ---------------------------------------------------------
 @router.get("/{project_id}/prd/active", response_model=schemas.PRDResponse)
@@ -178,9 +180,9 @@ def get_active_prd(project_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------
 # ✅ Export PRD to .docx
 # ---------------------------------------------------------
-@router.get("/prds/{prd_id}/export")
-def export_prd(prd_id: UUID, db: Session = Depends(get_db)):
-    prd = db.query(models.PRD).filter(models.PRD.id == prd_id).first()
+@router.get("/{project_id}/prds/{prd_id}/export")
+def export_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
+    prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
 
@@ -198,7 +200,6 @@ def export_prd(prd_id: UUID, db: Session = Depends(get_db)):
     doc.add_heading("Goals", level=1)
     doc.add_paragraph(prd.goals or "")
 
-    # Add full Markdown as plain text
     if hasattr(prd, "content") and prd.content:
         doc.add_heading("Full Markdown PRD", level=1)
         doc.add_paragraph(prd.content)

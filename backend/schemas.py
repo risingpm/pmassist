@@ -1,12 +1,18 @@
 from pydantic import BaseModel
-from typing import Any
+from typing import Optional
 from datetime import datetime
 from uuid import UUID
 
+# ---------------------------------------------------------
+# PRD Schemas
+# ---------------------------------------------------------
 
 class PRDCreate(BaseModel):
-    feature_name: str | None = None
-    prompt: str | None = None  # optional extra user guidance
+    feature_name: Optional[str] = None     # Optional feature name
+    prompt: Optional[str] = None           # Optional user prompt
+
+    class Config:
+        extra = "ignore"  # Ignore extra/missing fields so `{}` works
 
 
 class PRDRefine(BaseModel):
@@ -15,11 +21,11 @@ class PRDRefine(BaseModel):
 
 class PRDResponse(BaseModel):
     id: UUID
-    project_id: str
+    project_id: UUID   # ✅ fix here
     feature_name: str | None = None
     description: str | None = None
     goals: str | None = None
-    content: str | None = None   # full Markdown PRD
+    content: str | None = None
     version: int
     is_active: bool
     created_at: datetime
@@ -29,16 +35,18 @@ class PRDResponse(BaseModel):
         from_attributes = True
 
 
+# ---------------------------------------------------------
+# Document Schemas
+# ---------------------------------------------------------
 
 class DocumentResponse(BaseModel):
     id: UUID
-    project_id: str
+    project_id: UUID
     filename: str
-    chunk_index: str
+    chunk_index: int
     content: str
     uploaded_at: datetime
-    has_embedding: bool  # ✅ computed field
+    has_embedding: bool
 
     class Config:
-        from_attributes = True
-
+        orm_mode = True

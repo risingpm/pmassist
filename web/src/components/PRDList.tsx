@@ -3,7 +3,7 @@ import { getPrds, createPrd } from "../api";
 
 type PRDListProps = {
   projectId: string;
-  onSelectPrd: (id: string) => void;
+  onSelectPrd: (projectId: string, prdId: string) => void; // ✅ updated to pass both projectId + prdId
   onBack: () => void;
 };
 
@@ -18,7 +18,7 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
     getPrds(projectId)
       .then((data) => {
         console.log("PRDs response:", data);
-        setPrds(data.prds || []); // backend should return { prds: [...] }
+        setPrds(data || []);
       })
       .catch((err) => {
         console.error("Failed to load PRDs:", err);
@@ -27,13 +27,13 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
       .finally(() => setLoading(false));
   }, [projectId]);
 
-  // Generate new PRD
+  // Generate a new PRD
   const handleGenerate = async () => {
     setLoading(true);
     try {
       await createPrd(projectId);
       const refreshed = await getPrds(projectId);
-      setPrds(refreshed.prds || []);
+      setPrds(refreshed || []);
     } catch (err) {
       console.error("Failed to generate PRD:", err);
       setError("⚠️ Failed to generate PRD");
@@ -44,7 +44,7 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">📑 Product Requirement Documents</h1>
+      <h1 className="text-2xl font-bold mb-6">📄 Product Requirements Documents</h1>
 
       {/* Back + Generate buttons */}
       <div className="flex gap-2 mb-4">
@@ -63,28 +63,41 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
         </button>
       </div>
 
-      {/* Loading/Error */}
+      {/* Loading/Error states */}
       {loading && <p className="text-gray-500">Loading...</p>}
       {error && <p className="text-red-500">{error}</p>}
 
-      {/* PRD list */}
+      {/* PRDs Table */}
       {prds.length === 0 ? (
         <p className="text-gray-500">No PRDs yet. Click "Generate PRD" to create one.</p>
       ) : (
-        <ul className="space-y-2">
-          {prds.map((prd: any) => (
-            <li
-              key={prd.id}
-              className="p-2 border rounded cursor-pointer hover:bg-gray-100"
-              onClick={() => onSelectPrd(prd.id)}
-            >
-              <p className="font-medium">{prd.title || `PRD ${prd.id}`}</p>
-              <p className="text-sm text-gray-500">
-                Created: {new Date(prd.created_at).toLocaleString()}
-              </p>
-            </li>
-          ))}
-        </ul>
+        <table className="min-w-full border border-gray-300">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2 border">Feature Name</th>
+              <th className="p-2 border">Description</th>
+              <th className="p-2 border">Created At</th>
+              <th className="p-2 border">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {prds.map((prd: any) => (
+              <tr key={prd.id} className="hover:bg-gray-50">
+                <td className="p-2 border font-medium">{prd.feature_name || `PRD ${prd.id}`}</td>
+                <td className="p-2 border text-sm text-gray-600">{prd.description || "-"}</td>
+                <td className="p-2 border text-sm">{new Date(prd.created_at).toLocaleString()}</td>
+                <td className="p-2 border">
+                  <button
+                    onClick={() => onSelectPrd(projectId, prd.id)} // ✅ pass both projectId + prdId
+                    className="px-3 py-1 bg-blue-600 text-white rounded"
+                  >
+                    View
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );

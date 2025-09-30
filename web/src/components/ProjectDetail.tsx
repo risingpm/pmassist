@@ -33,7 +33,7 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
   const [roadmapLoading, setRoadmapLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState<"documents" | "roadmap" | "prd">("documents");
-  const [selectedPrdId, setSelectedPrdId] = useState<string | null>(null);
+  const [selectedPrd, setSelectedPrd] = useState<{ projectId: string; prdId: string } | null>(null);
 
   // --- Document handlers ---
   const fetchDocuments = async () => {
@@ -227,17 +227,17 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
 
       {activeTab === "prd" && (
         <>
-          {!selectedPrdId ? (
+          {!selectedPrd ? (
             <PRDList
               projectId={projectId}
-              onSelectPrd={(id) => setSelectedPrdId(id)}
+              onSelectPrd={(projId, id) => setSelectedPrd({ projectId: projId, prdId: id })}
               onBack={() => setActiveTab("documents")}
             />
           ) : (
             <PRDDetail
-              projectId={projectId}
-              prdId={selectedPrdId}
-              onBack={() => setSelectedPrdId(null)}
+              projectId={selectedPrd.projectId}
+              prdId={selectedPrd.prdId}
+              onBack={() => setSelectedPrd(null)}
             />
           )}
         </>
