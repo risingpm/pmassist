@@ -17,7 +17,12 @@ def generate_roadmap(project_id: str, db: Session):
         return {"error": "Project not found"}
 
     # Combine project + docs context
-    combined_text = f"Project: {project.title}\nDescription: {project.description}\nGoals: {project.goals}\n\n"
+    combined_text = (
+        f"Project: {project.title}\n"
+        f"Description: {project.description}\n"
+        f"Goals: {project.goals}\n"
+        f"North Star Metric: {project.north_star_metric or 'Not specified'}\n\n"
+    )
     combined_text += "\n".join([d.content for d in docs])
 
     prompt = f"""

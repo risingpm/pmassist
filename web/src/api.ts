@@ -13,7 +13,7 @@ export async function getProject(id: string) {
   return res.json();
 }
 
-export async function createProject(data: { title: string; description: string; goals: string }) {
+export async function createProject(data: { title: string; description: string; goals: string; north_star_metric?: string | null }) {
   const res = await fetch(`${API_BASE}/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -23,7 +23,7 @@ export async function createProject(data: { title: string; description: string; 
   return res.json();
 }
 
-export async function updateProject(id: string, data: { title: string; description: string; goals: string }) {
+export async function updateProject(id: string, data: { title: string; description: string; goals: string; north_star_metric?: string | null }) {
   const res = await fetch(`${API_BASE}/projects/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -79,18 +79,26 @@ export async function getPrd(projectId: string, prdId: string) {
   return res.json();
 }
 
-export async function refinePrd(prdId: string, instructions: string) {
-  const res = await fetch(`${API_BASE}/projects/prds/${prdId}/refine`, {
+export async function refinePrd(projectId: string, prdId: string, instructions: string) {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}/refine`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ instructions }),
+    body: JSON.stringify({ instructions })
   });
   if (!res.ok) throw new Error("Failed to refine PRD");
-  return res.json();
+  const data = await res.json();
+  return data.content;
 }
 
-export async function exportPrd(prdId: string) {
-  const res = await fetch(`${API_BASE}/projects/prds/${prdId}/export`);
+export async function deletePrd(projectId: string, prdId: string) {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete PRD");
+}
+
+export async function exportPrd(projectId: string, prdId: string) {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}/export`);
   if (!res.ok) throw new Error("Failed to export PRD");
 
   const blob = await res.blob();

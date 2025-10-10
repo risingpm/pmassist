@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Response
 from sqlalchemy.orm import Session
 from uuid import UUID
 import json
@@ -12,10 +12,10 @@ from docx import Document as DocxDocument
 import tempfile
 from dotenv import load_dotenv
 
-# ✅ Load environment variables
+# 🔑 Load environment variables
 load_dotenv()
 
-# ✅ OpenAI client
+# 🔑 OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 router = APIRouter(
@@ -23,24 +23,23 @@ router = APIRouter(
     tags=["prds"]
 )
 
-# ---------------------------------------------------------
-# ✅ Generate a new PRD (Markdown only)
-# ---------------------------------------------------------
+# -----------------------------
+# Generate a new PRD (Markdown only)
+# -----------------------------
 @router.post("/{project_id}/prd", response_model=schemas.PRDResponse)
 def generate_prd(project_id: str, prd_data: schemas.PRDCreate, db: Session = Depends(get_db)):
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 1. Collect previous PRDs for context
+    # collect context
     previous_prds = db.query(models.PRD).filter(models.PRD.project_id == project_id).all()
     previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
 
-    # 2. Collect uploaded documents for context
     docs = db.query(models.Document).filter(models.Document.project_id == project_id).all()
     docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
 
-    # 3. Build enriched prompt
+    # build prompt
     prompt = f"""
 Generate a Product Requirements Document (PRD) in **Markdown** format.
 
@@ -55,6 +54,7 @@ Include these sections:
 Project Title: {project.title}
 Description: {project.description}
 Goals: {project.goals}
+North Star Metric: {project.north_star_metric or 'Not specified'}
 
 Uploaded Documents:
 {docs_text}
@@ -66,7 +66,6 @@ Task: Generate a PRD for feature: {prd_data.feature_name}
 User instructions: {prd_data.prompt}
 """
 
-    # 4. Call OpenAI
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -76,9 +75,9 @@ User instructions: {prd_data.prompt}
         temperature=0.4,
     )
 
+    # ✅ FIX: use .content instead of ["content"]
     raw_content = response.choices[0].message.content
 
-    # 5. Save PRD in DB
     new_prd = models.PRD(
         project_id=project_id,
         feature_name=prd_data.feature_name,
@@ -100,34 +99,51 @@ User instructions: {prd_data.prompt}
 # ---------------------------------------------------------
 @router.put("/{project_id}/prds/{prd_id}/refine", response_model=schemas.PRDResponse)
 def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depends(get_db)):
-    prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
+    # Fetch the current PRD
+    prd = db.query(models.PRD).filter(
+        models.PRD.id == prd_id,
+        models.PRD.project_id == project_id
+    ).first()
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
 
-    # 🔹 Build AI prompt
-    prompt = f"""
-Here is the current PRD:
-{prd.content or ''}
+    # Collect project details
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
 
-User feedback for refinement:
-{refine_data.instructions}
+    # Collect previous PRDs (excluding current one)
+    previous_prds = db.query(models.PRD).filter(
+        models.PRD.project_id == project_id,
+        models.PRD.id != prd_id
+    ).all()
+    previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
 
-Please return an updated PRD in clean Markdown format,
-applying the requested refinements while keeping everything else consistent.
-"""
+    # Collect uploaded documents
+    docs = db.query(models.Document).filter(models.Document.project_id == project_id).all()
+    docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
 
+    # Build structured context for OpenAI
+    messages = [
+        {"role": "system", "content": "You are an expert product manager who refines PRDs in clean Markdown format."},
+        {"role": "user", "content": f"Project context:\nTitle: {project.title}\nDescription: {project.description}\nGoals: {project.goals}\nNorth Star Metric: {project.north_star_metric or 'Not specified'}"},
+        {"role": "user", "content": f"Uploaded documents:\n{docs_text}"},
+        {"role": "user", "content": f"Other PRDs for reference:\n{previous_prds_text}"},
+        {"role": "user", "content": f"Here is the current PRD to refine:\n{prd.content or ''}"},
+        {"role": "user", "content": f"Refinement instructions:\n{refine_data.instructions}\n\nPlease update the PRD accordingly while preserving its structure, goals, and context."},
+    ]
+
+    # Call OpenAI
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are an assistant that refines PRDs strictly in clean Markdown format."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.4,
+        messages=messages,
+        temperature=0.2,
+        max_tokens=2000,
     )
 
     refined_content = response.choices[0].message.content
 
-    # 🔹 Save as a new PRD version
+    # Save as a new PRD version
     new_version = prd.version + 1
     refined_prd = models.PRD(
         project_id=project_id,
@@ -139,7 +155,7 @@ applying the requested refinements while keeping everything else consistent.
         is_active=True,
     )
 
-    # Mark old one as inactive
+    # Mark old PRD inactive
     prd.is_active = False
 
     db.add(refined_prd)
@@ -149,17 +165,17 @@ applying the requested refinements while keeping everything else consistent.
     return refined_prd
 
 
-# ---------------------------------------------------------
-# ✅ List all PRDs for a project
-# ---------------------------------------------------------
+# -----------------------------
+# List all PRDs for a project
+# -----------------------------
 @router.get("/{project_id}/prds", response_model=list[schemas.PRDResponse])
 def list_prds(project_id: str, db: Session = Depends(get_db)):
     return db.query(models.PRD).filter(models.PRD.project_id == project_id).all()
 
 
-# ---------------------------------------------------------
-# ✅ Get a specific PRD by ID
-# ---------------------------------------------------------
+# -----------------------------
+# Get a specific PRD by ID
+# -----------------------------
 @router.get("/{project_id}/prds/{prd_id}", response_model=schemas.PRDResponse)
 def get_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
     prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
@@ -168,9 +184,42 @@ def get_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
     return prd
 
 
-# ---------------------------------------------------------
-# ✅ Get the active PRD
-# ---------------------------------------------------------
+# -----------------------------
+# Delete a PRD
+# -----------------------------
+@router.delete("/{project_id}/prds/{prd_id}", status_code=204)
+def delete_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
+    prd = db.query(models.PRD).filter(
+        models.PRD.id == prd_id,
+        models.PRD.project_id == project_id,
+    ).first()
+
+    if not prd:
+        raise HTTPException(status_code=404, detail="PRD not found")
+
+    was_active = prd.is_active
+
+    db.delete(prd)
+    db.flush()  # ensure deleted record is not considered in follow-up queries
+
+    if was_active:
+        replacement = (
+            db.query(models.PRD)
+            .filter(models.PRD.project_id == project_id)
+            .order_by(models.PRD.version.desc(), models.PRD.created_at.desc())
+            .first()
+        )
+        if replacement:
+            replacement.is_active = True
+
+    db.commit()
+
+    return Response(status_code=204)
+
+
+# -----------------------------
+# Get the active PRD
+# -----------------------------
 @router.get("/{project_id}/prd/active", response_model=schemas.PRDResponse)
 def get_active_prd(project_id: str, db: Session = Depends(get_db)):
     prd = (
@@ -184,9 +233,9 @@ def get_active_prd(project_id: str, db: Session = Depends(get_db)):
     return prd
 
 
-# ---------------------------------------------------------
-# ✅ Export PRD to .docx
-# ---------------------------------------------------------
+# -----------------------------
+# Export PRD to .docx
+# -----------------------------
 @router.get("/{project_id}/prds/{prd_id}/export")
 def export_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
     prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getPrds, createPrd } from "../api";
+import { getPrds, createPrd, deletePrd } from "../api";
 
 type PRDListProps = {
   projectId: string;
@@ -11,6 +11,7 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
   const [prds, setPrds] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // new state for form
   const [featureName, setFeatureName] = useState("");
@@ -45,9 +46,30 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
       setFeatureName("");
       setPrompt("");
       setError(null);
+      setSuccess("✅ PRD generated successfully");
     } catch (err) {
       console.error("Failed to generate PRD:", err);
       setError("❌ Failed to generate PRD");
+      setSuccess(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (prdId: string) => {
+    const confirmed = window.confirm("Are you sure you want to delete this PRD?");
+    if (!confirmed) return;
+
+    setLoading(true);
+    try {
+      await deletePrd(projectId, prdId);
+      setPrds((prev) => prev.filter((p) => p.id !== prdId));
+      setError(null);
+      setSuccess("🗑️ PRD deleted successfully");
+    } catch (err) {
+      console.error("Failed to delete PRD:", err);
+      setError("❌ Failed to delete PRD");
+      setSuccess(null);
     } finally {
       setLoading(false);
     }
@@ -105,6 +127,7 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
       {/* Loading/Error States */}
       {loading && <p className="text-gray-500">Loading...</p>}
       {error && <p className="text-red-500">{error}</p>}
+      {success && <p className="text-green-600">{success}</p>}
 
       {/* PRDs Table */}
       {prds.length === 0 ? (
@@ -139,6 +162,13 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
                     className="px-3 py-1 bg-blue-600 text-white rounded"
                   >
                     View
+                  </button>
+                  <button
+                    onClick={() => handleDelete(prd.id)}
+                    disabled={loading}
+                    className="ml-2 px-3 py-1 bg-red-600 text-white rounded disabled:opacity-50"
+                  >
+                    Delete
                   </button>
                 </td>
               </tr>

@@ -31,6 +31,7 @@ class Project(Base):
     title = Column(String, index=True)
     description = Column(String)
     goals = Column(String)
+    north_star_metric = Column(String)
 
     # Relationships
     roadmaps = relationship("Roadmap", back_populates="project", cascade="all, delete-orphan")
