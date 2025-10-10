@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Response
 from sqlalchemy.orm import Session
 from uuid import UUID
 import json
@@ -54,6 +54,7 @@ Include these sections:
 Project Title: {project.title}
 Description: {project.description}
 Goals: {project.goals}
+North Star Metric: {project.north_star_metric or 'Not specified'}
 
 Uploaded Documents:
 {docs_text}
@@ -93,36 +94,53 @@ User instructions: {prd_data.prompt}
     return new_prd
 
 
-# -----------------------------
-# Refine an existing PRD
-# -----------------------------
+# ---------------------------------------------------------
+# ✅ Refine an existing PRD
+# ---------------------------------------------------------
 @router.put("/{project_id}/prds/{prd_id}/refine", response_model=schemas.PRDResponse)
 def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depends(get_db)):
-    prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
+    # Fetch the current PRD
+    prd = db.query(models.PRD).filter(
+        models.PRD.id == prd_id,
+        models.PRD.project_id == project_id
+    ).first()
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
 
-    prompt = f"""
-Here is the current PRD:
-{prd.content or ''}
+    # Collect project details
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
 
-User feedback for refinement:
-{refine_data.instructions}
+    # Collect previous PRDs (excluding current one)
+    previous_prds = db.query(models.PRD).filter(
+        models.PRD.project_id == project_id,
+        models.PRD.id != prd_id
+    ).all()
+    previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
 
-Please return an updated PRD in clean Markdown format,
-applying the requested refinements while keeping everything else consistent.
-"""
+    # Collect uploaded documents
+    docs = db.query(models.Document).filter(models.Document.project_id == project_id).all()
+    docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
 
+    # Build structured context for OpenAI
+    messages = [
+        {"role": "system", "content": "You are an expert product manager who refines PRDs in clean Markdown format."},
+        {"role": "user", "content": f"Project context:\nTitle: {project.title}\nDescription: {project.description}\nGoals: {project.goals}\nNorth Star Metric: {project.north_star_metric or 'Not specified'}"},
+        {"role": "user", "content": f"Uploaded documents:\n{docs_text}"},
+        {"role": "user", "content": f"Other PRDs for reference:\n{previous_prds_text}"},
+        {"role": "user", "content": f"Here is the current PRD to refine:\n{prd.content or ''}"},
+        {"role": "user", "content": f"Refinement instructions:\n{refine_data.instructions}\n\nPlease update the PRD accordingly while preserving its structure, goals, and context."},
+    ]
+
+    # Call OpenAI
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are an assistant that refines PRDs strictly in clean Markdown format."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.4,
+        messages=messages,
+        temperature=0.2,
+        max_tokens=2000,
     )
 
-    # ✅ FIX: use .content instead of ["content"]
     refined_content = response.choices[0].message.content
 
     # Save as a new PRD version
@@ -137,7 +155,9 @@ applying the requested refinements while keeping everything else consistent.
         is_active=True,
     )
 
+    # Mark old PRD inactive
     prd.is_active = False
+
     db.add(refined_prd)
     db.commit()
     db.refresh(refined_prd)
@@ -162,6 +182,39 @@ def get_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
     return prd
+
+
+# -----------------------------
+# Delete a PRD
+# -----------------------------
+@router.delete("/{project_id}/prds/{prd_id}", status_code=204)
+def delete_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
+    prd = db.query(models.PRD).filter(
+        models.PRD.id == prd_id,
+        models.PRD.project_id == project_id,
+    ).first()
+
+    if not prd:
+        raise HTTPException(status_code=404, detail="PRD not found")
+
+    was_active = prd.is_active
+
+    db.delete(prd)
+    db.flush()  # ensure deleted record is not considered in follow-up queries
+
+    if was_active:
+        replacement = (
+            db.query(models.PRD)
+            .filter(models.PRD.project_id == project_id)
+            .order_by(models.PRD.version.desc(), models.PRD.created_at.desc())
+            .first()
+        )
+        if replacement:
+            replacement.is_active = True
+
+    db.commit()
+
+    return Response(status_code=204)
 
 
 # -----------------------------

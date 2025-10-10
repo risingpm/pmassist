@@ -32,6 +32,7 @@ def generate_roadmap(id: str, db: Session = Depends(get_db)):
 
     Project Description: {project.description}
     Goals: {project.goals}
+    North Star Metric: {project.north_star_metric or 'Not specified'}
 
     Format output strictly as JSON:
     {{

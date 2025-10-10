@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getPrd, refinePrd, exportPrd } from "../api";
+import { getPrd, refinePrd, exportPrd, deletePrd } from "../api";
 
 type PRDDetailProps = {
   projectId: string;
@@ -13,6 +13,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
   const [loading, setLoading] = useState(false);
   const [refineText, setRefineText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // Fetch PRD when component mounts
   useEffect(() => {
@@ -46,9 +47,11 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
 
       setRefineText("");
       setError(null);
+      setSuccess("✅ PRD refined successfully");
     } catch (err) {
       console.error("Failed to refine PRD:", err);
       setError("⚠️ Failed to refine PRD");
+      setSuccess(null);
     } finally {
       setLoading(false);
     }
@@ -58,9 +61,31 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
   const handleExport = async () => {
     try {
       await exportPrd(projectId, prdId);
+      setError(null);
+      setSuccess("📤 Export started");
     } catch (err) {
       console.error("Failed to export PRD:", err);
       setError("⚠️ Failed to export PRD");
+      setSuccess(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    const confirmed = window.confirm("Delete this PRD? This action cannot be undone.");
+    if (!confirmed) return;
+
+    setLoading(true);
+    try {
+      await deletePrd(projectId, prdId);
+      setError(null);
+      setSuccess("🗑️ PRD deleted successfully");
+      onBack();
+    } catch (err) {
+      console.error("Failed to delete PRD:", err);
+      setError("⚠️ Failed to delete PRD");
+      setSuccess(null);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -76,6 +101,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
 
       {loading && <p className="text-gray-500">Loading...</p>}
       {error && <p className="text-red-500">{error}</p>}
+      {success && <p className="text-green-600">{success}</p>}
 
       {prd ? (
         <div>
@@ -107,12 +133,22 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
           </div>
 
           {/* Export Button */}
-          <button
-            onClick={handleExport}
-            className="px-4 py-2 bg-blue-600 text-white rounded"
-          >
-            📤 Export PRD
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleExport}
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+            >
+              📤 Export PRD
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={loading}
+              className="px-4 py-2 bg-red-600 text-white rounded disabled:opacity-50"
+            >
+              🗑 Delete PRD
+            </button>
+          </div>
         </div>
       ) : (
         !loading && <p className="text-gray-500">No PRD found.</p>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import PRDList from "./PRDList";
 import PRDDetail from "./PRDDetail";
+import { getProject } from "../api";
 
 type Document = {
   id: string;
@@ -31,6 +32,12 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
   const [loading, setLoading] = useState(false);
   const [roadmapData, setRoadmapData] = useState<RoadmapResponse | null>(null);
   const [roadmapLoading, setRoadmapLoading] = useState(false);
+  const [projectInfo, setProjectInfo] = useState<{
+    title: string;
+    description: string;
+    goals: string;
+    north_star_metric?: string | null;
+  } | null>(null);
 
   const [activeTab, setActiveTab] = useState<"documents" | "roadmap" | "prd">("documents");
   const [selectedPrd, setSelectedPrd] = useState<{ projectId: string; prdId: string } | null>(null);
@@ -110,6 +117,24 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
     fetchRoadmap();
   }, [projectId]);
 
+  useEffect(() => {
+    const fetchProjectInfo = async () => {
+      try {
+        const data = await getProject(projectId);
+        setProjectInfo({
+          title: data.project.title,
+          description: data.project.description,
+          goals: data.project.goals,
+          north_star_metric: data.project.north_star_metric,
+        });
+      } catch (err) {
+        console.error("Failed to load project info", err);
+      }
+    };
+
+    fetchProjectInfo();
+  }, [projectId]);
+
   // --- UI ---
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -120,6 +145,23 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
       >
         ⬅ Back to Projects
       </button>
+
+      {projectInfo && (
+        <div className="mb-4 rounded border p-4">
+          <h2 className="text-xl font-semibold">{projectInfo.title}</h2>
+          <p className="text-sm text-gray-600 mt-1">{projectInfo.description}</p>
+          <div className="mt-3 grid gap-3 text-sm text-gray-700 md:grid-cols-2">
+            <div>
+              <p className="font-medium">Goals</p>
+              <p>{projectInfo.goals}</p>
+            </div>
+            <div>
+              <p className="font-medium">North Star Metric</p>
+              <p>{projectInfo.north_star_metric || "Not specified"}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-4 mb-6 border-b">

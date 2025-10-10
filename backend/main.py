@@ -38,11 +38,14 @@ class ProjectCreate(BaseModel):
     title: str
     description: str
     goals: str
+    north_star_metric: str | None = None
+
 
 class ProjectUpdate(BaseModel):
     title: str
     description: str
     goals: str
+    north_star_metric: str | None = None
 
 # -----------------------------
 # Routes
@@ -59,7 +62,8 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     db_project = Project(
         title=project.title,
         description=project.description,
-        goals=project.goals
+        goals=project.goals,
+        north_star_metric=project.north_star_metric
     )
     db.add(db_project)
     db.commit()
@@ -67,7 +71,8 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     return {"id": db_project.id, "project": {
         "title": db_project.title,
         "description": db_project.description,
-        "goals": db_project.goals
+        "goals": db_project.goals,
+        "north_star_metric": db_project.north_star_metric
     }}
 
 
@@ -76,7 +81,13 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 def list_projects(db: Session = Depends(get_db)):
     projects = db.query(Project).all()
     return {"projects": [
-        {"id": p.id, "title": p.title, "description": p.description, "goals": p.goals}
+        {
+            "id": p.id,
+            "title": p.title,
+            "description": p.description,
+            "goals": p.goals,
+            "north_star_metric": p.north_star_metric,
+        }
         for p in projects
     ]}
 
@@ -90,7 +101,8 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     return {"id": project.id, "project": {
         "title": project.title,
         "description": project.description,
-        "goals": project.goals
+        "goals": project.goals,
+        "north_star_metric": project.north_star_metric
     }}
 
 
@@ -104,13 +116,15 @@ def update_project(project_id: str, project: ProjectUpdate, db: Session = Depend
     db_project.title = project.title
     db_project.description = project.description
     db_project.goals = project.goals
+    db_project.north_star_metric = project.north_star_metric
     db.commit()
     db.refresh(db_project)
 
     return {"id": db_project.id, "project": {
         "title": db_project.title,
         "description": db_project.description,
-        "goals": db_project.goals
+        "goals": db_project.goals,
+        "north_star_metric": db_project.north_star_metric
     }}
 
 
