@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Literal
 from datetime import datetime
 from uuid import UUID
 
@@ -50,3 +50,32 @@ class DocumentResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+# ---------------------------------------------------------
+# Roadmap Chat Schemas
+# ---------------------------------------------------------
+
+class RoadmapChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class RoadmapGenerateRequest(BaseModel):
+    prompt: str
+    conversation_history: list[RoadmapChatMessage] = Field(default_factory=list)
+
+
+class RoadmapGenerateResponse(BaseModel):
+    message: str
+    conversation_history: list[RoadmapChatMessage]
+    roadmap: str | None = None
+
+
+class RoadmapUpdateRequest(BaseModel):
+    content: str
+
+
+class RoadmapContentResponse(BaseModel):
+    content: str
+    updated_at: datetime

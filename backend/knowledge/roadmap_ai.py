@@ -1,124 +1,174 @@
 import os
+from textwrap import dedent
 import json
 import uuid
-from fastapi import APIRouter, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from backend.models import Document, Project, Roadmap
+
 from backend.database import get_db
+from backend.models import Project, Document, PRD, Roadmap, RoadmapConversation
+from backend import schemas
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def generate_roadmap(project_id: str, db: Session):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    docs = db.query(Document).filter(Document.project_id == project_id).all()
-
-    if not project:
-        return {"error": "Project not found"}
-
-    # Combine project + docs context
-    combined_text = (
-        f"Project: {project.title}\n"
-        f"Description: {project.description}\n"
-        f"Goals: {project.goals}\n"
-        f"North Star Metric: {project.north_star_metric or 'Not specified'}\n\n"
-    )
-    combined_text += "\n".join([d.content for d in docs])
-
-    prompt = f"""
-    You are a Product Manager AI.
-
-    Based on the project info and PRDs below:
-
-    1. Identify the **features already implemented** (from the description and documents). 
-       - Group them into categories under "existing_features".
-       - Do NOT include any future ideas here. 
-       - This is strictly the current state of the product.
-
-    2. Then create a **forward-looking roadmap**:
-       - MVP: features that should be prioritized for the next immediate milestone.
-       - Phase 2: mid-term enhancements (next 3-6 months).
-       - Phase 3: long-term vision, ambitious or strategic expansions (6+ months).
-       - Roadmap should **not duplicate existing features** — only include new, future-oriented items.
-       - Be bold and visionary in later phases.
-
-    Output strictly valid JSON only. 
-    Do NOT include markdown formatting, no triple backticks, no language tags. 
-    Follow this schema exactly:
-
-    {{
-      "existing_features": {{
-        "Category 1": ["Feature A", "Feature B"],
-        "Category 2": ["Feature C"]
-      }},
-      "roadmap": [
-        {{"phase": "MVP", "items": ["Feature X", "Feature Y"]}},
-        {{"phase": "Phase 2", "items": ["Feature Z"]}},
-        {{"phase": "Phase 3", "items": ["Feature W"]}}
-      ]
-    }}
-
-    Context:\n{combined_text}
+SYSTEM_PROMPT = dedent(
     """
+    You are an expert product strategy assistant. When helping a product manager craft a roadmap:
+    - Ask focused product management questions to clarify vision, personas, desired outcomes, constraints, risks, and timelines if details are missing.
+    - Once you have enough context, produce a comprehensive roadmap in Markdown with sections for MVP, Phase 2, and Phase 3.
 
+    Respond exclusively in JSON following one of the shapes below:
+
+    1. Ask for clarification:
+       {
+         "action": "ask_followup",
+         "message": "<your question in natural language>",
+         "note_key": "<snake_case_key to store the user's answer>"
+       }
+
+    2. Present the roadmap:
+       {
+         "action": "present_roadmap",
+         "message": "<short introduction>",
+         "roadmap_markdown": "<markdown roadmap with headings for MVP, Phase 2, Phase 3>"
+       }
+    """
+).strip()
+
+
+def build_context_block(project: Project, docs: list[Document], prds: list[PRD]) -> str:
+    lines = [
+        f"Project Title: {project.title}",
+        f"Description: {project.description}",
+        f"Goals: {project.goals}",
+        f"North Star Metric: {project.north_star_metric or 'Not specified'}",
+        "",
+        "Key Documents:",
+    ]
+    if docs:
+        for doc in docs[:10]:
+            preview = doc.content[:500]
+            lines.append(f"- {doc.filename}: {preview}")
+    else:
+        lines.append("- None uploaded")
+
+    if prds:
+        lines.append("\nExisting PRDs:")
+        for prd in prds[:5]:
+            content_preview = (prd.content or "")[:800]
+            lines.append(f"--- PRD ---\n{content_preview}")
+    return "\n".join(lines)
+
+
+def store_conversation(db: Session, project_id: str, messages: list[schemas.RoadmapChatMessage]) -> None:
+    db.query(RoadmapConversation).filter(RoadmapConversation.project_id == project_id).delete()
+    for msg in messages:
+        db.add(
+            RoadmapConversation(
+                id=uuid.uuid4(),
+                project_id=project_id,
+                message_role=msg.role,
+                message_content=msg.content,
+            )
+        )
+    db.commit()
+
+
+def upsert_roadmap(db: Session, project_id: str, content: str) -> Roadmap:
+    roadmap = (
+        db.query(Roadmap)
+        .filter(Roadmap.project_id == project_id, Roadmap.is_active == True)
+        .order_by(Roadmap.created_at.desc())
+        .first()
+    )
+    if roadmap:
+        roadmap.content = content
+        roadmap.is_active = True
+    else:
+        roadmap = Roadmap(id=uuid.uuid4(), project_id=project_id, content=content, is_active=True)
+        db.add(roadmap)
+    db.commit()
+    db.refresh(roadmap)
+    return roadmap
+
+
+router = APIRouter(prefix="/projects", tags=["roadmap"])
+
+
+@router.post("/{project_id}/roadmap/generate", response_model=schemas.RoadmapGenerateResponse)
+def generate_roadmap_endpoint(
+    project_id: str,
+    payload: schemas.RoadmapGenerateRequest,
+    db: Session = Depends(get_db),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    docs = db.query(Document).filter(Document.project_id == project_id).all()
+    prds = db.query(PRD).filter(PRD.project_id == project_id).all()
+    context_block = build_context_block(project, docs, prds)
+
+    history_messages = payload.conversation_history or []
+    prompt = (payload.prompt or "").strip()
+    if not prompt and not history_messages:
+        raise HTTPException(status_code=400, detail="Prompt is required to start the conversation.")
+
+    effective_history = history_messages.copy()
+    if prompt:
+        effective_history.append(schemas.RoadmapChatMessage(role="user", content=prompt))
+
+    openai_messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Project context:\n{context_block}"},
+    ]
+    openai_messages.extend(
+        {"role": msg.role, "content": msg.content} for msg in effective_history
+    )
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3
+        messages=openai_messages,
+        temperature=0.2,
+        response_format={"type": "json_object"},
     )
 
-    roadmap_json = response.choices[0].message.content.strip()
-
-    # ✅ Safety: remove code fences if GPT still adds them
-    if roadmap_json.startswith("```"):
-        roadmap_json = roadmap_json.strip("`")
-        roadmap_json = roadmap_json.replace("json", "", 1).strip()
-
-    # Try to parse as JSON
     try:
-        roadmap_data = json.loads(roadmap_json)
-    except Exception as e:
-        return {
-            "error": f"Failed to parse roadmap JSON: {str(e)}",
-            "raw_output": roadmap_json
-        }
+        data = json.loads(response.choices[0].message.content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"Assistant returned invalid JSON: {exc}")
 
-    # Deactivate old roadmaps for this project
-    db.query(Roadmap).filter(
-        Roadmap.project_id == project_id,
-        Roadmap.is_active == True
-    ).update({"is_active": False})
+    action = data.get("action")
+    assistant_message = data.get("message", "")
+    if action not in {"ask_followup", "present_roadmap"}:
+        raise HTTPException(status_code=500, detail="Assistant returned an unknown action.")
 
-    # Save new roadmap
-    new_roadmap = Roadmap(
-        id=uuid.uuid4(),
-        project_id=project_id,
-        content=roadmap_data,
-        is_active=True
+    updated_history = effective_history + [
+        schemas.RoadmapChatMessage(role="assistant", content=assistant_message)
+    ]
+
+    roadmap_markdown: str | None = None
+    if action == "present_roadmap":
+        roadmap_markdown = data.get("roadmap_markdown", "").strip()
+        if not roadmap_markdown:
+            raise HTTPException(status_code=500, detail="Assistant did not include roadmap_markdown.")
+        upsert_roadmap(db, project_id, roadmap_markdown)
+    else:
+        roadmap_markdown = None
+
+    store_conversation(db, project_id, updated_history)
+
+    return schemas.RoadmapGenerateResponse(
+        message=assistant_message,
+        conversation_history=updated_history,
+        roadmap=roadmap_markdown,
     )
-    db.add(new_roadmap)
-    db.commit()
-    db.refresh(new_roadmap)
-
-    return {
-        "roadmap": roadmap_data,
-        "created_at": new_roadmap.created_at.isoformat()
-    }
 
 
-# ------------------ FastAPI Router ------------------
-
-router = APIRouter(prefix="/roadmap-ai", tags=["roadmap-ai"])
-
-@router.post("/{project_id}")
-def generate_project_roadmap(project_id: str, db: Session = Depends(get_db)):
-    """Generate (or regenerate) roadmap for a project"""
-    return generate_roadmap(project_id, db)
-
-@router.get("/{project_id}")
-def get_latest_roadmap(project_id: str, db: Session = Depends(get_db)):
-    """Fetch the latest active roadmap for a project"""
+@router.get("/{project_id}/roadmap", response_model=schemas.RoadmapContentResponse)
+def get_saved_roadmap(project_id: str, db: Session = Depends(get_db)):
     roadmap = (
         db.query(Roadmap)
         .filter(Roadmap.project_id == project_id, Roadmap.is_active == True)
@@ -126,8 +176,21 @@ def get_latest_roadmap(project_id: str, db: Session = Depends(get_db)):
         .first()
     )
     if not roadmap:
-        return {"message": "No roadmap found"}
+        raise HTTPException(status_code=404, detail="No roadmap found")
+    return schemas.RoadmapContentResponse(
+        content=roadmap.content,
+        updated_at=roadmap.updated_at or roadmap.created_at,
+    )
+
+
+@router.put("/{project_id}/roadmap")
+def update_roadmap(project_id: str, payload: schemas.RoadmapUpdateRequest, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    roadmap = upsert_roadmap(db, project_id, payload.content)
     return {
-        "roadmap": roadmap.content,
-        "created_at": roadmap.created_at.isoformat()
+        "id": str(roadmap.id),
+        "updated_at": (roadmap.updated_at or roadmap.created_at).isoformat(),
     }

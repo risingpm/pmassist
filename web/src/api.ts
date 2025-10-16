@@ -1,5 +1,16 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type RoadmapGenerateResponse = {
+  message: string;
+  conversation_history: ChatMessage[];
+  roadmap?: string | null;
+};
+
 // ---------------- Projects ----------------
 export async function getProjects() {
   const res = await fetch(`${API_BASE}/projects`);
@@ -42,17 +53,39 @@ export async function deleteProject(id: string) {
 }
 
 // ---------------- Roadmap ----------------
-export async function generateRoadmap(projectId: string) {
-  const res = await fetch(`${API_BASE}/roadmap-ai/${projectId}`, {
-    method: "POST",
-  });
-  if (!res.ok) throw new Error("Failed to generate roadmap");
+export async function fetchRoadmap(projectId: string) {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/roadmap`);
+  if (!res.ok) throw new Error("Failed to fetch roadmap");
   return res.json();
 }
 
-export async function getRoadmap(projectId: string) {
-  const res = await fetch(`${API_BASE}/roadmap-ai/${projectId}`);
-  if (!res.ok) throw new Error("Failed to fetch roadmap");
+export async function generateRoadmapChat(
+  projectId: string,
+  prompt: string,
+  conversation: ChatMessage[]
+): Promise<RoadmapGenerateResponse> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/roadmap/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, conversation_history: conversation }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to generate roadmap");
+  }
+  return res.json();
+}
+
+export async function updateRoadmap(projectId: string, content: string) {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/roadmap`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to update roadmap");
+  }
   return res.json();
 }
 

@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.types import UserDefinedType
 from sqlalchemy.orm import relationship
@@ -35,6 +35,9 @@ class Project(Base):
 
     # Relationships
     roadmaps = relationship("Roadmap", back_populates="project", cascade="all, delete-orphan")
+    roadmap_conversations = relationship(
+        "RoadmapConversation", back_populates="project", cascade="all, delete-orphan"
+    )
     prds = relationship("PRD", back_populates="project", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
 
@@ -45,12 +48,24 @@ class Roadmap(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    content = Column(JSONB, nullable=False)
+    content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     is_active = Column(Boolean, default=True)
 
-    # Relationship
     project = relationship("Project", back_populates="roadmaps")
+
+
+class RoadmapConversation(Base):
+    __tablename__ = "roadmap_conversations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    message_role = Column(String, nullable=False)
+    message_content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    project = relationship("Project", back_populates="roadmap_conversations")
 
 
 # ✅ PRD Model (updated with explicit fields)
