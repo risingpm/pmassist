@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional, Literal, Any
 from datetime import datetime
 from uuid import UUID
 
@@ -30,6 +30,7 @@ class PRDResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    workspace_id: UUID | None = None
 
     class Config:
         from_attributes = True
@@ -47,6 +48,7 @@ class DocumentResponse(BaseModel):
     content: str
     uploaded_at: datetime
     has_embedding: bool
+    workspace_id: UUID | None = None
 
     class Config:
         orm_mode = True
@@ -64,12 +66,16 @@ class RoadmapChatMessage(BaseModel):
 class RoadmapGenerateRequest(BaseModel):
     prompt: str
     conversation_history: list[RoadmapChatMessage] = Field(default_factory=list)
+    user_id: UUID | None = None
+    workspace_id: UUID
 
 
 class RoadmapGenerateResponse(BaseModel):
     message: str
     conversation_history: list[RoadmapChatMessage]
     roadmap: str | None = None
+    action: str
+    suggestions: list[str] | None = None
 
 
 class RoadmapUpdateRequest(BaseModel):
@@ -79,3 +85,95 @@ class RoadmapUpdateRequest(BaseModel):
 class RoadmapContentResponse(BaseModel):
     content: str
     updated_at: datetime
+
+
+# ---------------------------------------------------------
+# User Agent Schemas
+# ---------------------------------------------------------
+
+class AgentBase(BaseModel):
+    name: str
+    personality: Optional[str] = None
+    focus_areas: list[str] = Field(default_factory=list)
+    integrations: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentCreate(AgentBase):
+    pass
+
+
+class AgentUpdate(BaseModel):
+    name: Optional[str] = None
+    personality: Optional[str] = None
+    focus_areas: Optional[list[str]] = None
+    integrations: Optional[dict[str, Any]] = None
+
+
+class AgentResponse(AgentBase):
+    id: UUID
+    user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------
+# Auth Schemas
+# ---------------------------------------------------------
+
+
+class AuthCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class AuthLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class AuthResponse(BaseModel):
+    id: UUID
+    email: EmailStr
+    workspace_id: UUID | None = None
+    workspace_name: str | None = None
+
+
+class WorkspaceResponse(BaseModel):
+    id: UUID
+    name: str
+    owner_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WorkspaceCreate(BaseModel):
+    name: str
+
+
+class WorkspaceUpdate(BaseModel):
+    name: str
+
+
+# ---------------------------------------------------------
+# Password reset
+# ---------------------------------------------------------
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    reset_token: str
+    expires_at: datetime
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)

@@ -3,11 +3,12 @@ import { getPrds, createPrd, deletePrd } from "../api";
 
 type PRDListProps = {
   projectId: string;
+  workspaceId: string | null;
   onSelectPrd: (projectId: string, prdId: string) => void;
   onBack: () => void;
 };
 
-export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps) {
+export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }: PRDListProps) {
   const [prds, setPrds] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,8 +20,12 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
 
   // Fetch PRDs on mount
   useEffect(() => {
+    if (!workspaceId) {
+      setError("Workspace not available. Return to projects and choose a workspace.");
+      return;
+    }
     setLoading(true);
-    getPrds(projectId)
+    getPrds(projectId, workspaceId)
       .then((data) => {
         console.log("PRDs response:", data);
         setPrds(data || []);
@@ -30,18 +35,19 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
         setError("❌ Failed to load PRDs");
       })
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, workspaceId]);
 
   // Handle Generate via form
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await createPrd(projectId, {
+      if (!workspaceId) throw new Error("Missing workspace context");
+      await createPrd(projectId, workspaceId, {
         feature_name: featureName,
         prompt: prompt,
       });
-      const refreshed = await getPrds(projectId);
+      const refreshed = await getPrds(projectId, workspaceId);
       setPrds(refreshed || []);
       setFeatureName("");
       setPrompt("");
@@ -62,7 +68,8 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
 
     setLoading(true);
     try {
-      await deletePrd(projectId, prdId);
+      if (!workspaceId) throw new Error("Missing workspace context");
+      await deletePrd(projectId, prdId, workspaceId);
       setPrds((prev) => prev.filter((p) => p.id !== prdId));
       setError(null);
       setSuccess("🗑️ PRD deleted successfully");
@@ -77,6 +84,11 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
 
   return (
     <div>
+      {!workspaceId && (
+        <p className="mb-4 text-sm text-red-500">
+          Workspace context missing. Please go back and select a workspace.
+        </p>
+      )}
       <h1 className="text-2xl font-bold mb-6">📄 Product Requirements Documents</h1>
 
       {/* Back Button */}
@@ -158,7 +170,7 @@ export default function PRDList({ projectId, onSelectPrd, onBack }: PRDListProps
                 </td>
                 <td className="p-2 border">
                   <button
-                    onClick={() => onSelectPrd(projectId, prd.id)}
+                  onClick={() => onSelectPrd(projectId, prd.id)}
                     className="px-3 py-1 bg-blue-600 text-white rounded"
                   >
                     View

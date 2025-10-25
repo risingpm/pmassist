@@ -4,6 +4,7 @@ from uuid import UUID
 import json
 from .database import get_db
 from . import models, schemas
+from .workspaces import get_project_in_workspace
 
 from openai import OpenAI
 import os
@@ -27,16 +28,30 @@ router = APIRouter(
 # Generate a new PRD (Markdown only)
 # -----------------------------
 @router.post("/{project_id}/prd", response_model=schemas.PRDResponse)
-def generate_prd(project_id: str, prd_data: schemas.PRDCreate, db: Session = Depends(get_db)):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+def generate_prd(project_id: str, prd_data: schemas.PRDCreate, workspace_id: UUID, db: Session = Depends(get_db)):
+    project = get_project_in_workspace(db, project_id, workspace_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     # collect context
-    previous_prds = db.query(models.PRD).filter(models.PRD.project_id == project_id).all()
+    previous_prds = (
+        db.query(models.PRD)
+        .filter(
+            models.PRD.project_id == project_id,
+            models.PRD.workspace_id.in_([project.workspace_id, None]),
+        )
+        .all()
+    )
     previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
 
-    docs = db.query(models.Document).filter(models.Document.project_id == project_id).all()
+    docs = (
+        db.query(models.Document)
+        .filter(
+            models.Document.project_id == project_id,
+            models.Document.workspace_id.in_([project.workspace_id, None]),
+        )
+        .all()
+    )
     docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
 
     # build prompt
@@ -55,6 +70,7 @@ Project Title: {project.title}
 Description: {project.description}
 Goals: {project.goals}
 North Star Metric: {project.north_star_metric or 'Not specified'}
+Target Personas: {', '.join(project.target_personas or []) or 'Not specified'}
 
 Uploaded Documents:
 {docs_text}
@@ -80,6 +96,7 @@ User instructions: {prd_data.prompt}
 
     new_prd = models.PRD(
         project_id=project_id,
+        workspace_id=project.workspace_id,
         feature_name=prd_data.feature_name,
         description=prd_data.prompt,
         goals=project.goals,
@@ -98,35 +115,53 @@ User instructions: {prd_data.prompt}
 # ✅ Refine an existing PRD
 # ---------------------------------------------------------
 @router.put("/{project_id}/prds/{prd_id}/refine", response_model=schemas.PRDResponse)
-def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, db: Session = Depends(get_db)):
+def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, workspace_id: UUID, db: Session = Depends(get_db)):
     # Fetch the current PRD
-    prd = db.query(models.PRD).filter(
-        models.PRD.id == prd_id,
-        models.PRD.project_id == project_id
-    ).first()
+    project = get_project_in_workspace(db, project_id, workspace_id)
+
+    prd = (
+        db.query(models.PRD)
+        .filter(
+            models.PRD.id == prd_id,
+            models.PRD.project_id == project_id,
+            models.PRD.workspace_id == project.workspace_id,
+        )
+        .first()
+    )
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
 
     # Collect project details
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # project already resolved
 
     # Collect previous PRDs (excluding current one)
-    previous_prds = db.query(models.PRD).filter(
-        models.PRD.project_id == project_id,
-        models.PRD.id != prd_id
-    ).all()
+    previous_prds = (
+        db.query(models.PRD)
+        .filter(
+            models.PRD.project_id == project_id,
+            models.PRD.id != prd_id,
+            models.PRD.workspace_id.in_([project.workspace_id, None]),
+        )
+        .all()
+    )
     previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
 
     # Collect uploaded documents
-    docs = db.query(models.Document).filter(models.Document.project_id == project_id).all()
+    docs = (
+        db.query(models.Document)
+        .filter(
+            models.Document.project_id == project_id,
+            models.Document.workspace_id.in_([project.workspace_id, None]),
+        )
+        .all()
+    )
     docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
 
     # Build structured context for OpenAI
     messages = [
         {"role": "system", "content": "You are an expert product manager who refines PRDs in clean Markdown format."},
         {"role": "user", "content": f"Project context:\nTitle: {project.title}\nDescription: {project.description}\nGoals: {project.goals}\nNorth Star Metric: {project.north_star_metric or 'Not specified'}"},
+        {"role": "user", "content": f"Target Personas: {', '.join(project.target_personas or []) or 'Not specified'}"},
         {"role": "user", "content": f"Uploaded documents:\n{docs_text}"},
         {"role": "user", "content": f"Other PRDs for reference:\n{previous_prds_text}"},
         {"role": "user", "content": f"Here is the current PRD to refine:\n{prd.content or ''}"},
@@ -147,6 +182,7 @@ def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, db
     new_version = prd.version + 1
     refined_prd = models.PRD(
         project_id=project_id,
+        workspace_id=project.workspace_id,
         feature_name=prd.feature_name,
         description=prd.description,
         goals=prd.goals,
@@ -169,16 +205,26 @@ def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, db
 # List all PRDs for a project
 # -----------------------------
 @router.get("/{project_id}/prds", response_model=list[schemas.PRDResponse])
-def list_prds(project_id: str, db: Session = Depends(get_db)):
-    return db.query(models.PRD).filter(models.PRD.project_id == project_id).all()
+def list_prds(project_id: str, workspace_id: UUID, db: Session = Depends(get_db)):
+    project = get_project_in_workspace(db, project_id, workspace_id)
+    return (
+        db.query(models.PRD)
+        .filter(models.PRD.project_id == project_id, models.PRD.workspace_id == project.workspace_id)
+        .all()
+    )
 
 
 # -----------------------------
 # Get a specific PRD by ID
 # -----------------------------
 @router.get("/{project_id}/prds/{prd_id}", response_model=schemas.PRDResponse)
-def get_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
-    prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
+def get_prd(project_id: str, prd_id: UUID, workspace_id: UUID, db: Session = Depends(get_db)):
+    project = get_project_in_workspace(db, project_id, workspace_id)
+    prd = (
+        db.query(models.PRD)
+        .filter(models.PRD.id == prd_id, models.PRD.project_id == project_id, models.PRD.workspace_id == project.workspace_id)
+        .first()
+    )
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
     return prd
@@ -188,11 +234,17 @@ def get_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
 # Delete a PRD
 # -----------------------------
 @router.delete("/{project_id}/prds/{prd_id}", status_code=204)
-def delete_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
-    prd = db.query(models.PRD).filter(
-        models.PRD.id == prd_id,
-        models.PRD.project_id == project_id,
-    ).first()
+def delete_prd(project_id: str, prd_id: UUID, workspace_id: UUID, db: Session = Depends(get_db)):
+    project = get_project_in_workspace(db, project_id, workspace_id)
+    prd = (
+        db.query(models.PRD)
+        .filter(
+            models.PRD.id == prd_id,
+            models.PRD.project_id == project_id,
+            models.PRD.workspace_id == project.workspace_id,
+        )
+        .first()
+    )
 
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")

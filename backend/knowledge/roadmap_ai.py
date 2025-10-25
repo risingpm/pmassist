@@ -8,10 +8,39 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import Project, Document, PRD, Roadmap, RoadmapConversation
+from backend.models import Project, Document, PRD, Roadmap, RoadmapConversation, UserAgent
+from backend.workspaces import get_project_in_workspace
 from backend import schemas
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+DEFAULT_SUGGESTIONS = {
+    "vision": [
+        "We want to solve...",
+        "Our strategic focus is...",
+        "The customer pain is...",
+    ],
+    "persona": [
+        "Primary persona is...",
+        "Target user segment includes...",
+    ],
+    "outcomes": [
+        "Key metrics to move are...",
+        "Success looks like...",
+    ],
+    "constraints": [
+        "We must respect...",
+        "Dependencies include...",
+    ],
+    "timeline": [
+        "We need MVP by...",
+        "Full rollout expected in...",
+    ],
+    "risks": [
+        "Top risks are...",
+        "Unknowns we should highlight...",
+    ],
+}
 
 SYSTEM_PROMPT = dedent(
     """
@@ -25,17 +54,31 @@ SYSTEM_PROMPT = dedent(
        {
          "action": "ask_followup",
          "message": "<your question in natural language>",
-         "note_key": "<snake_case_key to store the user's answer>"
+         "note_key": "<snake_case_key to store the user's answer>",
+         "suggestions": ["<optional quick reply 1>", "<optional quick reply 2>"]
        }
 
     2. Present the roadmap:
        {
          "action": "present_roadmap",
          "message": "<short introduction>",
-         "roadmap_markdown": "<markdown roadmap with headings for MVP, Phase 2, Phase 3>"
+         "roadmap_markdown": "<markdown roadmap with headings for MVP, Phase 2, Phase 3>",
+         "suggestions": []
        }
     """
 ).strip()
+
+
+def build_agent_prompt(agent: UserAgent | None) -> str | None:
+    if not agent:
+        return None
+
+    focus = ", ".join(agent.focus_areas) if agent.focus_areas else "varied product workflows"
+    personality = agent.personality or "product"
+    name = agent.name or "Your AI PM"
+    return (
+        f"You are {name}, a {personality} AI Product Manager. You specialize in {focus} and assist your user across product workflows."
+    )
 
 
 def build_context_block(project: Project, docs: list[Document], prds: list[PRD]) -> str:
@@ -44,6 +87,7 @@ def build_context_block(project: Project, docs: list[Document], prds: list[PRD])
         f"Description: {project.description}",
         f"Goals: {project.goals}",
         f"North Star Metric: {project.north_star_metric or 'Not specified'}",
+        f"Target Personas: {', '.join(project.target_personas or []) or 'Not specified'}",
         "",
         "Key Documents:",
     ]
@@ -76,18 +120,26 @@ def store_conversation(db: Session, project_id: str, messages: list[schemas.Road
     db.commit()
 
 
-def upsert_roadmap(db: Session, project_id: str, content: str) -> Roadmap:
+def upsert_roadmap(db: Session, project: Project, content: str) -> Roadmap:
     roadmap = (
         db.query(Roadmap)
-        .filter(Roadmap.project_id == project_id, Roadmap.is_active == True)
+        .filter(Roadmap.project_id == project.id, Roadmap.is_active == True)
         .order_by(Roadmap.created_at.desc())
         .first()
     )
     if roadmap:
         roadmap.content = content
         roadmap.is_active = True
+        if not roadmap.workspace_id:
+            roadmap.workspace_id = project.workspace_id
     else:
-        roadmap = Roadmap(id=uuid.uuid4(), project_id=project_id, content=content, is_active=True)
+        roadmap = Roadmap(
+            id=uuid.uuid4(),
+            project_id=project.id,
+            content=content,
+            is_active=True,
+            workspace_id=project.workspace_id,
+        )
         db.add(roadmap)
     db.commit()
     db.refresh(roadmap)
@@ -103,12 +155,27 @@ def generate_roadmap_endpoint(
     payload: schemas.RoadmapGenerateRequest,
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    if not payload.workspace_id:
+        raise HTTPException(status_code=400, detail="workspace_id is required")
 
-    docs = db.query(Document).filter(Document.project_id == project_id).all()
-    prds = db.query(PRD).filter(PRD.project_id == project_id).all()
+    project = get_project_in_workspace(db, project_id, payload.workspace_id)
+
+    docs = (
+        db.query(Document)
+        .filter(
+            Document.project_id == project_id,
+            Document.workspace_id.in_([project.workspace_id, None]),
+        )
+        .all()
+    )
+    prds = (
+        db.query(PRD)
+        .filter(
+            PRD.project_id == project_id,
+            PRD.workspace_id.in_([project.workspace_id, None]),
+        )
+        .all()
+    )
     context_block = build_context_block(project, docs, prds)
 
     history_messages = payload.conversation_history or []
@@ -120,8 +187,19 @@ def generate_roadmap_endpoint(
     if prompt:
         effective_history.append(schemas.RoadmapChatMessage(role="user", content=prompt))
 
+    agent_prompt = None
+    if payload.user_id:
+        agent = (
+            db.query(UserAgent)
+            .filter(UserAgent.user_id == payload.user_id)
+            .first()
+        )
+        agent_prompt = build_agent_prompt(agent)
+
+    system_message = SYSTEM_PROMPT if not agent_prompt else f"{agent_prompt}\n\n{SYSTEM_PROMPT}"
+
     openai_messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_message},
         {"role": "user", "content": f"Project context:\n{context_block}"},
     ]
     openai_messages.extend(
@@ -150,13 +228,30 @@ def generate_roadmap_endpoint(
     ]
 
     roadmap_markdown: str | None = None
+    note_key = data.get("note_key")
+    suggestions_raw = data.get("suggestions")
+    suggestions: list[str] | None = None
+    if isinstance(suggestions_raw, list):
+        cleaned = [str(item) for item in suggestions_raw if isinstance(item, (str, int, float))]
+        if cleaned:
+            suggestions = cleaned[:4]
     if action == "present_roadmap":
         roadmap_markdown = data.get("roadmap_markdown", "").strip()
         if not roadmap_markdown:
             raise HTTPException(status_code=500, detail="Assistant did not include roadmap_markdown.")
-        upsert_roadmap(db, project_id, roadmap_markdown)
+        saved = upsert_roadmap(db, project, roadmap_markdown)
     else:
         roadmap_markdown = None
+        if not suggestions:
+            key = str(note_key or "").lower()
+            defaults = DEFAULT_SUGGESTIONS.get(key)
+            if defaults:
+                suggestions = defaults[:3]
+            else:
+                suggestions = [
+                    "Let me add more context...",
+                    "Here are some constraints...",
+                ]
 
     store_conversation(db, project_id, updated_history)
 
@@ -164,6 +259,8 @@ def generate_roadmap_endpoint(
         message=assistant_message,
         conversation_history=updated_history,
         roadmap=roadmap_markdown,
+        action=action,
+        suggestions=suggestions,
     )
 
 

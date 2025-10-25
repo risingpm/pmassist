@@ -5,10 +5,11 @@ import { getPrd, refinePrd, exportPrd, deletePrd } from "../api";
 type PRDDetailProps = {
   projectId: string;
   prdId: string;
+  workspaceId: string | null;
   onBack: () => void;
 };
 
-export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) {
+export default function PRDDetail({ projectId, prdId, workspaceId, onBack }: PRDDetailProps) {
   const [prd, setPrd] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [refineText, setRefineText] = useState("");
@@ -18,9 +19,13 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
   // Fetch PRD when component mounts
   useEffect(() => {
     const fetchPrd = async () => {
+      if (!workspaceId) {
+        setError("Workspace context missing. Go back and select a workspace.");
+        return;
+      }
       setLoading(true);
       try {
-        const data = await getPrd(projectId, prdId);
+        const data = await getPrd(projectId, prdId, workspaceId);
         setPrd(data);
         setError(null);
       } catch (err) {
@@ -32,7 +37,7 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
     };
 
     fetchPrd();
-  }, [projectId, prdId]);
+  }, [projectId, prdId, workspaceId]);
 
   // Handle refinement
   const handleRefine = async () => {
@@ -40,7 +45,8 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
     setLoading(true);
     try {
       // ✅ Pass both projectId + prdId, return Markdown string
-      const newContent = await refinePrd(projectId, prdId, refineText);
+      if (!workspaceId) throw new Error("Missing workspace context");
+      const newContent = await refinePrd(projectId, prdId, workspaceId, refineText);
 
       // ✅ Update only the content field, keep rest of PRD intact
       setPrd((prev: any) => (prev ? { ...prev, content: newContent } : prev));
@@ -60,7 +66,8 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
   // Handle export
   const handleExport = async () => {
     try {
-      await exportPrd(projectId, prdId);
+      if (!workspaceId) throw new Error("Missing workspace context");
+      await exportPrd(projectId, prdId, workspaceId);
       setError(null);
       setSuccess("📤 Export started");
     } catch (err) {
@@ -76,7 +83,8 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
 
     setLoading(true);
     try {
-      await deletePrd(projectId, prdId);
+      if (!workspaceId) throw new Error("Missing workspace context");
+      await deletePrd(projectId, prdId, workspaceId);
       setError(null);
       setSuccess("🗑️ PRD deleted successfully");
       onBack();
@@ -91,6 +99,11 @@ export default function PRDDetail({ projectId, prdId, onBack }: PRDDetailProps) 
 
   return (
     <div>
+      {!workspaceId && (
+        <p className="mb-4 text-sm text-red-500">
+          Workspace context missing. Please return to the project list.
+        </p>
+      )}
       {/* Back Button */}
       <button
         onClick={onBack}
