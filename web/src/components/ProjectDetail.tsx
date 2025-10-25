@@ -1,7 +1,65 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import SafeMarkdown from "./SafeMarkdown";
 import PRDList from "./PRDList";
 import PRDDetail from "./PRDDetail";
-import { getProject } from "../api";
+import {
+  getProject,
+  fetchRoadmap as fetchSavedRoadmap,
+  generateRoadmapChat,
+  updateRoadmap,
+  updateProject,
+  type ChatMessage,
+} from "../api";
+import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
+
+const makeId = () => Math.random().toString(36).slice(2, 10);
+
+function formatRoadmapForDisplay(content: string): string {
+  if (!content) return "";
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{")) {
+    return trimmed;
+  }
+
+  try {
+    const payload = JSON.parse(trimmed);
+    const lines: string[] = [];
+
+    const existing = payload.existing_features || payload.existing || {};
+    if (existing && Object.keys(existing).length > 0) {
+      lines.push("## Existing Features\n");
+      Object.entries(existing).forEach(([category, items]) => {
+        lines.push(`### ${category}`);
+        (items as string[]).forEach((item) => {
+          lines.push(`- ${item}`);
+        });
+        lines.push("");
+      });
+    }
+
+    const roadmap = payload.roadmap || payload.phases || [];
+    if (roadmap && Array.isArray(roadmap)) {
+      lines.push("## Roadmap\n");
+      roadmap.forEach((phase: any) => {
+        const phaseName = phase.phase || phase.name || "Phase";
+        lines.push(`### ${phaseName}`);
+        (phase.items || []).forEach((item: string) => {
+          lines.push(`- ${item}`);
+        });
+        lines.push("");
+      });
+    }
+
+    if (lines.length === 0) {
+      return trimmed;
+    }
+
+    return lines.join("\n").trim();
+  } catch (err) {
+    console.warn("Unable to parse roadmap JSON, showing raw content.", err);
+    return trimmed;
+  }
+}
 
 type Document = {
   id: string;
@@ -11,121 +69,354 @@ type Document = {
   has_embedding: boolean;
 };
 
-type Roadmap = {
-  existing_features: Record<string, string[]>;
-  roadmap: { phase: string; items: string[] }[];
-};
-
-type RoadmapResponse = {
-  roadmap: Roadmap;
-  created_at: string;
-};
-
 type ProjectDetailProps = {
   projectId: string;
+  workspaceId: string | null;
+  onProjectUpdated: (project: {
+    id: string;
+    title: string;
+    description: string;
+    goals: string;
+    north_star_metric?: string | null;
+    target_personas?: string[] | null;
+  }) => void;
   onBack: () => void;
 };
 
-export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps) {
+type ConversationEntry = ChatMessage & { id: string };
+
+type RoadmapPreview = {
+  content: string;
+  updated_at: string;
+};
+
+export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated, onBack }: ProjectDetailProps) {
+  const userId = useMemo(() => {
+    if (typeof window === "undefined") {
+      return (import.meta.env.VITE_DEFAULT_USER_ID as string | undefined) ?? null;
+    }
+
+    const authRaw = window.sessionStorage.getItem(AUTH_USER_KEY);
+    if (authRaw) {
+      try {
+        const parsed = JSON.parse(authRaw) as { id?: string };
+        if (parsed?.id) {
+          return parsed.id;
+        }
+      } catch {
+        // ignore parsing errors and fall through
+      }
+    }
+    return (
+      window.sessionStorage.getItem(USER_ID_KEY) ||
+      (import.meta.env.VITE_DEFAULT_USER_ID as string | undefined) ||
+      null
+    );
+  }, []);
+
+  const effectiveWorkspaceId = useMemo(() => {
+    if (workspaceId) return workspaceId;
+    if (typeof window === "undefined") return null;
+    return window.sessionStorage.getItem(WORKSPACE_ID_KEY);
+  }, [workspaceId]);
+
   const [documents, setDocuments] = useState<Document[]>([]);
   const [file, setFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [roadmapData, setRoadmapData] = useState<RoadmapResponse | null>(null);
-  const [roadmapLoading, setRoadmapLoading] = useState(false);
+  const [loadingDocs, setLoadingDocs] = useState(false);
   const [projectInfo, setProjectInfo] = useState<{
     title: string;
     description: string;
     goals: string;
     north_star_metric?: string | null;
+    target_personas?: string[] | null;
   } | null>(null);
 
-  const [activeTab, setActiveTab] = useState<"documents" | "roadmap" | "prd">("documents");
-  const [selectedPrd, setSelectedPrd] = useState<{ projectId: string; prdId: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<"documents" | "roadmap" | "prd">(
+    "documents"
+  );
+  const [selectedPrd, setSelectedPrd] = useState<{
+    projectId: string;
+    prdId: string;
+  } | null>(null);
 
-  // --- Document handlers ---
+  // Roadmap interaction state
+  const [conversation, setConversation] = useState<ConversationEntry[]>([]);
+  const [promptInput, setPromptInput] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [showAssistant, setShowAssistant] = useState(false);
+
+  const [roadmapPreview, setRoadmapPreview] = useState<RoadmapPreview | null>(null);
+  const [isEditingRoadmap, setIsEditingRoadmap] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [savingRoadmap, setSavingRoadmap] = useState(false);
+  const [isAssistantTyping, setIsAssistantTyping] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isEditingProject, setIsEditingProject] = useState(false);
+  const [projectSaving, setProjectSaving] = useState(false);
+  const [projectSaveMessage, setProjectSaveMessage] = useState<string | null>(null);
+  const [projectForm, setProjectForm] = useState({
+    title: "",
+    description: "",
+    goals: "",
+    north_star_metric: "",
+    target_personas: "",
+  });
+
+  const resetConversation = () => {
+    setConversation([]);
+    setPromptInput("");
+    setGenerateError(null);
+    setSuggestions([]);
+  };
+
+  useEffect(() => {
+    if (!projectInfo) return;
+    setProjectForm({
+      title: projectInfo.title,
+      description: projectInfo.description,
+      goals: projectInfo.goals,
+      north_star_metric: projectInfo.north_star_metric || "",
+      target_personas: (projectInfo.target_personas || []).join(", "),
+    });
+  }, [projectInfo]);
+
+  // ------------------- Document handlers -------------------
   const fetchDocuments = async () => {
-    console.log("Fetching documents for project", projectId);
-    const res = await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}`);
-    const data = await res.json();
-    console.log("Documents response:", data);
-    setDocuments(data);
+    if (!effectiveWorkspaceId) {
+      setDocuments([]);
+      return;
+    }
+    setLoadingDocs(true);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}`
+      );
+      const data = await res.json();
+      setDocuments(data);
+    } catch (err) {
+      console.error("Failed to fetch documents", err);
+    } finally {
+      setLoadingDocs(false);
+    }
   };
 
   const handleUpload = async () => {
     if (!file) return;
-    setLoading(true);
+    setLoadingDocs(true);
 
     const formData = new FormData();
     formData.append("file", file);
 
-    await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}`, {
-      method: "POST",
-      body: formData,
-    });
-
-    setFile(null);
-    await fetchDocuments();
-    setLoading(false);
+    try {
+      if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
+      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}`, {
+        method: "POST",
+        body: formData,
+      });
+      setFile(null);
+      await fetchDocuments();
+    } catch (err) {
+      console.error("Failed to upload document", err);
+    } finally {
+      setLoadingDocs(false);
+    }
   };
 
   const handleEmbed = async () => {
-    setLoading(true);
-    await fetch(`${import.meta.env.VITE_API_BASE}/documents/embed/${projectId}`, {
-      method: "POST",
-    });
-    await fetchDocuments();
-    setLoading(false);
-  };
-
-  const handleDelete = async (docId: string) => {
-    await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}/${docId}`, {
-      method: "DELETE",
-    });
-    await fetchDocuments();
-  };
-
-  // --- Roadmap handlers ---
-  const fetchRoadmap = async () => {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE}/roadmap-ai/${projectId}`);
-    const data = await res.json();
-    if (data.roadmap) {
-      setRoadmapData(data);
-    } else {
-      setRoadmapData(null);
+    setLoadingDocs(true);
+    try {
+      if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
+      await fetch(`${import.meta.env.VITE_API_BASE}/documents/embed/${projectId}?workspace_id=${effectiveWorkspaceId}`, {
+        method: "POST",
+      });
+      await fetchDocuments();
+    } catch (err) {
+      console.error("Failed to trigger embeddings", err);
+    } finally {
+      setLoadingDocs(false);
     }
   };
 
-  const handleGenerateRoadmap = async () => {
-    setRoadmapLoading(true);
-    const res = await fetch(`${import.meta.env.VITE_API_BASE}/roadmap-ai/${projectId}`, {
-      method: "POST",
-    });
-    const data = await res.json();
-
-    if (data.roadmap) {
-      setRoadmapData(data);
-    } else {
-      setRoadmapData(null);
+  const handleDeleteDocument = async (docId: string) => {
+    try {
+      if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
+      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}/${docId}?workspace_id=${effectiveWorkspaceId}`, {
+        method: "DELETE",
+      });
+      await fetchDocuments();
+    } catch (err) {
+      console.error("Failed to delete document", err);
     }
-
-    setRoadmapLoading(false);
   };
 
-  // --- Lifecycle ---
-  useEffect(() => {
-    fetchDocuments();
-    fetchRoadmap();
-  }, [projectId]);
+  const groupedDocuments = useMemo(
+    () => [...new Map(documents.map((d) => [d.filename, d])).values()],
+    [documents]
+  );
 
+  // ------------------- Roadmap handlers -------------------
+  const loadRoadmap = async () => {
+    if (!effectiveWorkspaceId) return;
+    try {
+      const data = await fetchSavedRoadmap(projectId, effectiveWorkspaceId);
+      setRoadmapPreview({ content: data.content, updated_at: data.updated_at });
+    } catch {
+      setRoadmapPreview(null);
+    }
+  };
+
+  const handleGenerateRoadmap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const prompt = promptInput.trim();
+    if (!prompt) {
+      setGenerateError(
+        conversation.length === 0
+          ? "Describe what you need from the roadmap."
+          : "Please provide a reply before continuing."
+      );
+      return;
+    }
+
+    if (!effectiveWorkspaceId) {
+      setGenerateError("Workspace missing. Return to projects and re-open.");
+      return;
+    }
+
+    const userMessage: ConversationEntry = {
+      id: makeId(),
+      role: "user",
+      content: prompt,
+    };
+    setConversation((prev) => [...prev, userMessage]);
+    setPromptInput("");
+    setSuggestions([]);
+    setIsGenerating(true);
+    setIsAssistantTyping(true);
+    setGenerateError(null);
+
+    const historyPayload: ChatMessage[] = [...conversation, userMessage].map(
+      ({ role, content }) => ({ role, content })
+    );
+
+    try {
+      if (!effectiveWorkspaceId) {
+        throw new Error("Workspace context missing");
+      }
+      const response = await generateRoadmapChat(
+        projectId,
+        "",
+        historyPayload,
+        userId ?? undefined,
+        effectiveWorkspaceId
+      );
+
+      const mapped = response.conversation_history.map<ConversationEntry>((msg) => ({
+        ...msg,
+        id: makeId(),
+      }));
+
+      const assistantEntry = mapped[mapped.length - 1];
+      const prior = mapped.slice(0, -1);
+      setConversation(prior);
+
+      const animateAssistantMessage = (entry: ConversationEntry) => {
+        const full = entry.content;
+        const tempId = entry.id;
+        setConversation((prev) => [...prev, { ...entry, content: "" }]);
+
+        let index = 0;
+        const step = Math.max(1, Math.ceil(full.length / 40));
+        const timer = window.setInterval(() => {
+          index += step;
+          const nextSlice = full.slice(0, Math.min(index, full.length));
+          setConversation((prev) =>
+            prev.map((msg) =>
+              msg.id === tempId ? { ...msg, content: nextSlice } : msg
+            )
+          );
+          if (index >= full.length) {
+            clearInterval(timer);
+            setIsAssistantTyping(false);
+            setConversation((prev) =>
+              prev.map((msg) => (msg.id === tempId ? entry : msg))
+            );
+          }
+        }, 20);
+      };
+
+      if (assistantEntry) {
+        animateAssistantMessage(assistantEntry);
+      } else {
+        setIsAssistantTyping(false);
+      }
+
+      if (response.roadmap) {
+        await loadRoadmap();
+      }
+
+      if (response.action === "ask_followup") {
+        setSuggestions(response.suggestions ?? []);
+      } else {
+        setSuggestions([]);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setGenerateError(err.message || "Failed to generate roadmap.");
+      setIsAssistantTyping(false);
+      setSuggestions([]);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleStartNewConversation = () => {
+    resetConversation();
+  };
+
+  const handleStartEditingRoadmap = () => {
+    if (!roadmapPreview) return;
+    setEditContent(roadmapPreview.content);
+    setIsEditingRoadmap(true);
+    setSaveMessage(null);
+  };
+
+  const handleCancelEditingRoadmap = () => {
+    setIsEditingRoadmap(false);
+    setSaveMessage(null);
+  };
+
+  const handleSaveRoadmap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingRoadmap(true);
+    setSaveMessage(null);
+    try {
+      if (!effectiveWorkspaceId) throw new Error("Workspace context missing");
+      await updateRoadmap(projectId, effectiveWorkspaceId, editContent);
+      setSaveMessage("Roadmap updated.");
+      setIsEditingRoadmap(false);
+      await loadRoadmap();
+    } catch (err: any) {
+      console.error(err);
+      setSaveMessage(err.message || "Failed to save roadmap.");
+    } finally {
+      setSavingRoadmap(false);
+    }
+  };
+
+  // ------------------- Lifecycle -------------------
   useEffect(() => {
     const fetchProjectInfo = async () => {
       try {
-        const data = await getProject(projectId);
+        if (!effectiveWorkspaceId) return;
+        const data = await getProject(projectId, effectiveWorkspaceId);
         setProjectInfo({
           title: data.project.title,
           description: data.project.description,
           goals: data.project.goals,
           north_star_metric: data.project.north_star_metric,
+          target_personas: data.project.target_personas,
         });
       } catch (err) {
         console.error("Failed to load project info", err);
@@ -133,156 +424,513 @@ export default function ProjectDetail({ projectId, onBack }: ProjectDetailProps)
     };
 
     fetchProjectInfo();
-  }, [projectId]);
+  }, [projectId, effectiveWorkspaceId]);
 
-  // --- UI ---
-  return (
-    <div className="p-6 max-w-4xl mx-auto">
-      {/* Back Button */}
-      <button
-        onClick={onBack}
-        className="mb-4 px-4 py-2 bg-gray-600 text-white rounded"
-      >
-        ⬅ Back to Projects
-      </button>
+  useEffect(() => {
+    fetchDocuments();
+    loadRoadmap();
+  }, [projectId, effectiveWorkspaceId]);
 
-      {projectInfo && (
-        <div className="mb-4 rounded border p-4">
-          <h2 className="text-xl font-semibold">{projectInfo.title}</h2>
-          <p className="text-sm text-gray-600 mt-1">{projectInfo.description}</p>
-          <div className="mt-3 grid gap-3 text-sm text-gray-700 md:grid-cols-2">
-            <div>
-              <p className="font-medium">Goals</p>
-              <p>{projectInfo.goals}</p>
-            </div>
-            <div>
-              <p className="font-medium">North Star Metric</p>
-              <p>{projectInfo.north_star_metric || "Not specified"}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div className="flex gap-4 mb-6 border-b">
+  // ------------------- Render -------------------
+  if (!effectiveWorkspaceId) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-rose-500">
+          Workspace context missing. Please return to the dashboard and select a workspace.
+        </p>
         <button
-          className={`px-4 py-2 ${activeTab === "documents" ? "border-b-2 border-blue-600 font-semibold" : ""}`}
-          onClick={() => setActiveTab("documents")}
+          onClick={onBack}
+          className="mt-3 rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
         >
-          📄 Documents
-        </button>
-        <button
-          className={`px-4 py-2 ${activeTab === "roadmap" ? "border-b-2 border-blue-600 font-semibold" : ""}`}
-          onClick={() => setActiveTab("roadmap")}
-        >
-          🛠 Roadmap
-        </button>
-        <button
-          className={`px-4 py-2 ${activeTab === "prd" ? "border-b-2 border-blue-600 font-semibold" : ""}`}
-          onClick={() => setActiveTab("prd")}
-        >
-          📑 PRDs
+          Back to projects
         </button>
       </div>
+    );
+  }
 
-      {/* Tab Content */}
-      {activeTab === "documents" && (
-        <div>
-          <h1 className="text-2xl font-bold mb-6">📄 Project Documents</h1>
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <button
+          onClick={onBack}
+          className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
+        >
+          ⬅ Back to Projects
+        </button>
 
-          {/* Upload + Embed */}
-          <div className="flex items-center gap-2 mb-4">
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        {projectInfo && (
+          <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h1 className="text-3xl font-bold text-slate-900">{projectInfo.title}</h1>
+            <p className="mt-3 text-slate-600">{projectInfo.description}</p>
+            <div className="mt-4 grid gap-4 text-sm text-slate-600 md:grid-cols-2">
+              <div>
+                <p className="font-semibold text-slate-700">Goals</p>
+                <p className="mt-1 leading-relaxed">{projectInfo.goals}</p>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-700">North Star Metric</p>
+                <p className="mt-1">
+                  {projectInfo.north_star_metric || "Not specified"}
+                </p>
+              </div>
+              <div className="md:col-span-2">
+                <p className="font-semibold text-slate-700">Target Personas</p>
+                <p className="mt-1">
+                  {projectInfo.target_personas && projectInfo.target_personas.length > 0
+                    ? projectInfo.target_personas.join(", ")
+                    : "Not specified"}
+                </p>
+              </div>
+            </div>
             <button
-              onClick={handleUpload}
-              disabled={loading}
-              className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+              onClick={() => {
+                setProjectSaveMessage(null);
+                setIsEditingProject(true);
+              }}
+              className="mt-4 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
             >
-              {loading ? "Uploading..." : "Upload"}
-            </button>
-            <button
-              onClick={handleEmbed}
-              disabled={loading}
-              className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
-            >
-              Embed
+              Edit project details
             </button>
           </div>
+        )}
 
-          {/* Document List (grouped by filename) */}
-          {documents.length === 0 ? (
-            <p className="text-gray-500">No documents uploaded.</p>
-          ) : (
-            <ul className="space-y-2">
-              {[...new Map(documents.map((d) => [d.filename, d])).values()].map((doc) => (
-                <li key={doc.id} className="flex justify-between items-center p-2 border rounded">
-                  <div>
-                    <p className="font-medium">{doc.filename}</p>
-                    <p className="text-sm text-gray-500">
-                      Uploaded: {new Date(doc.uploaded_at).toLocaleString()}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleDelete(doc.id)}
-                    className="px-2 py-1 bg-red-500 text-white rounded"
-                  >
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {activeTab === "roadmap" && (
-        <div>
-          <h1 className="text-2xl font-bold mb-6">🛠 AI Roadmap</h1>
-
+        <div className="mt-8 flex gap-6 border-b border-slate-200 pb-3 text-sm font-semibold text-slate-500">
           <button
-            onClick={handleGenerateRoadmap}
-            disabled={roadmapLoading}
-            className="mb-4 px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+            onClick={() => setActiveTab("documents")}
+            className={
+              activeTab === "documents"
+                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
+                : "pb-2 hover:text-slate-700"
+            }
           >
-            {roadmapLoading ? "Generating..." : "Generate Roadmap"}
+            Documents
           </button>
+          <button
+            onClick={() => setActiveTab("roadmap")}
+            className={
+              activeTab === "roadmap"
+                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
+                : "pb-2 hover:text-slate-700"
+            }
+          >
+            Roadmap
+          </button>
+          <button
+            onClick={() => setActiveTab("prd")}
+            className={
+              activeTab === "prd"
+                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
+                : "pb-2 hover:text-slate-700"
+            }
+          >
+            PRDs
+          </button>
+        </div>
 
-          {roadmapData ? (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold">Phases</h2>
-              {roadmapData.roadmap.roadmap.map((phase, idx) => (
-                <div key={idx} className="p-2 border rounded">
-                  <h3 className="font-bold">{phase.phase}</h3>
-                  <ul className="list-disc list-inside">
-                    {phase.items.map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+        {activeTab === "documents" && (
+          <section className="mt-6 space-y-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-semibold text-slate-900">Project Documents</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Upload supporting artefacts to improve roadmap and PRD quality.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <input
+                  type="file"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  className="text-sm"
+                />
+                <button
+                  onClick={handleUpload}
+                  disabled={loadingDocs}
+                  className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {loadingDocs ? "Uploading..." : "Upload"}
+                </button>
+                <button
+                  onClick={handleEmbed}
+                  disabled={loadingDocs}
+                  className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-60"
+                >
+                  Embed
+                </button>
+              </div>
             </div>
-          ) : (
-            <p className="text-gray-500">No roadmap yet. Generate one above.</p>
-          )}
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-800">Uploaded Files</h3>
+              {groupedDocuments.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No documents uploaded yet.</p>
+              ) : (
+                <ul className="mt-4 space-y-3">
+                  {groupedDocuments.map((doc) => (
+                    <li
+                      key={doc.id}
+                      className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                    >
+                      <div>
+                        <p className="font-medium text-slate-800">{doc.filename}</p>
+                        <p className="text-xs text-slate-500">
+                          Uploaded {new Date(doc.uploaded_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteDocument(doc.id)}
+                        className="text-sm font-semibold text-rose-500 transition hover:text-rose-600"
+                      >
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+        )}
+
+        {activeTab === "roadmap" && (
+          <section className="mt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-semibold text-slate-900">AI Roadmap</h2>
+              <button
+                onClick={() => setShowAssistant(true)}
+                className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              >
+                Open assistant
+              </button>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              {roadmapPreview && !isEditingRoadmap && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">
+                    Last updated {new Date(roadmapPreview.updated_at).toLocaleString()}
+                  </span>
+                  <button
+                    onClick={handleStartEditingRoadmap}
+                    className="text-sm font-semibold text-blue-600 transition hover:text-blue-700"
+                  >
+                    Update roadmap
+                  </button>
+                </div>
+              )}
+
+              {isEditingRoadmap ? (
+                <form onSubmit={handleSaveRoadmap} className="mt-4 space-y-3">
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={12}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                  <div className="flex items-center justify-end gap-3 text-sm">
+                    <button
+                      type="button"
+                      onClick={handleCancelEditingRoadmap}
+                      className="rounded-full bg-slate-200 px-4 py-2 font-semibold text-slate-600 transition hover:bg-slate-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingRoadmap}
+                      className="rounded-full bg-blue-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {savingRoadmap ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                  {saveMessage && (
+                    <p className="text-xs text-slate-500">{saveMessage}</p>
+                  )}
+                </form>
+              ) : roadmapPreview ? (
+                <div className="mt-4 space-y-4 text-sm text-slate-700">
+                  <SafeMarkdown>
+                    {formatRoadmapForDisplay(
+                      typeof roadmapPreview.content === "string"
+                        ? roadmapPreview.content
+                        : JSON.stringify(roadmapPreview.content ?? "", null, 2)
+                    )}
+                  </SafeMarkdown>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-slate-500">
+                  No roadmap saved yet. Start a conversation with the assistant.
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {activeTab === "prd" && (
+          <section className="mt-6">
+            {!selectedPrd ? (
+              <PRDList
+                projectId={projectId}
+                workspaceId={effectiveWorkspaceId}
+                onSelectPrd={(projId, id) =>
+                  setSelectedPrd({ projectId: projId, prdId: id })
+                }
+                onBack={() => setActiveTab("documents")}
+              />
+            ) : (
+              <PRDDetail
+                projectId={selectedPrd.projectId}
+                prdId={selectedPrd.prdId}
+                workspaceId={effectiveWorkspaceId}
+                onBack={() => setSelectedPrd(null)}
+              />
+            )}
+          </section>
+        )}
+      </div>
+      {showAssistant && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30">
+          <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Roadmap assistant</h3>
+                <p className="text-xs text-slate-500">
+                  Share your intent, answer follow-ups, and refine the roadmap instantly.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAssistant(false);
+                  setSuggestions([]);
+                }}
+                className="rounded-full bg-slate-200 px-3 py-1 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+              {conversation.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  No messages yet. Provide a prompt to begin.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {conversation.map((msg) => (
+                    <li
+                      key={msg.id}
+                      className={
+                        msg.role === "user"
+                          ? "ml-auto max-w-[85%] rounded-2xl bg-blue-600 px-4 py-2 text-sm text-white"
+                          : "max-w-[90%] rounded-2xl bg-slate-100 px-4 py-2 text-sm text-slate-800"
+                      }
+                    >
+                      <span className="block whitespace-pre-wrap">{msg.content}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {isAssistantTyping && (
+                <div className="flex justify-start">
+                  <div className="max-w-[70%] rounded-2xl bg-slate-100 px-4 py-2 text-sm text-slate-500">
+                    Assistant is typing…
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {generateError && (
+              <p className="px-6 text-sm text-rose-500">{generateError}</p>
+            )}
+
+            <form onSubmit={handleGenerateRoadmap} className="border-t border-slate-200 px-6 py-4 space-y-3">
+              <textarea
+                value={promptInput}
+                onChange={(e) => setPromptInput(e.target.value)}
+                placeholder={
+                  conversation.length === 0
+                    ? "Describe the initiative or strategic question you want the roadmap to cover"
+                    : "Reply to the assistant..."
+                }
+                rows={3}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                disabled={isGenerating}
+              />
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>
+                  Conversation length: {conversation.length} message{conversation.length === 1 ? "" : "s"}
+                </span>
+                <div className="flex items-center gap-2">
+                  {conversation.length > 0 && !isGenerating && (
+                    <button
+                      type="button"
+                      onClick={handleStartNewConversation}
+                      className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
+                    >
+                      Reset
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                    disabled={isGenerating}
+                  >
+                    {isGenerating ? "Thinking..." : "Send"}
+                  </button>
+                </div>
+              </div>
+              {suggestions.length > 0 && (
+                <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 text-xs">
+                  {suggestions.map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => setPromptInput(chip)}
+                      className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </form>
+          </div>
         </div>
       )}
+      {isEditingProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Edit project</h2>
+              <button
+                onClick={() => setIsEditingProject(false)}
+                className="text-slate-400 transition hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (!effectiveWorkspaceId) {
+                  setProjectSaveMessage("Workspace context missing");
+                  return;
+                }
+                if (!projectInfo) return;
 
-      {activeTab === "prd" && (
-        <>
-          {!selectedPrd ? (
-            <PRDList
-              projectId={projectId}
-              onSelectPrd={(projId, id) => setSelectedPrd({ projectId: projId, prdId: id })}
-              onBack={() => setActiveTab("documents")}
-            />
-          ) : (
-            <PRDDetail
-              projectId={selectedPrd.projectId}
-              prdId={selectedPrd.prdId}
-              onBack={() => setSelectedPrd(null)}
-            />
-          )}
-        </>
+                setProjectSaving(true);
+                setProjectSaveMessage(null);
+                const personasArray = projectForm.target_personas
+                  .split(",")
+                  .map((entry) => entry.trim())
+                  .filter(Boolean);
+
+                try {
+                  const updated = await updateProject(projectId, {
+                    title: projectForm.title.trim(),
+                    description: projectForm.description.trim(),
+                    goals: projectForm.goals.trim(),
+                    north_star_metric: projectForm.north_star_metric.trim() || null,
+                    target_personas: personasArray,
+                    workspace_id: effectiveWorkspaceId,
+                  });
+                  setProjectInfo({
+                    title: updated.project.title,
+                    description: updated.project.description,
+                    goals: updated.project.goals,
+                    north_star_metric: updated.project.north_star_metric,
+                    target_personas: updated.project.target_personas,
+                  });
+                  onProjectUpdated({
+                    id: projectId,
+                    title: updated.project.title,
+                    description: updated.project.description,
+                    goals: updated.project.goals,
+                    north_star_metric: updated.project.north_star_metric,
+                    target_personas: updated.project.target_personas,
+                  });
+                  setProjectSaveMessage("Project updated successfully.");
+                  setIsEditingProject(false);
+                } catch (err: any) {
+                  console.error("Failed to update project", err);
+                  setProjectSaveMessage(err.message || "Failed to update project");
+                } finally {
+                  setProjectSaving(false);
+                }
+              }}
+            >
+              <label className="block text-sm font-medium text-slate-600">
+                Title
+                <input
+                  value={projectForm.title}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, title: event.target.value }))
+                  }
+                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-600">
+                Description
+                <textarea
+                  value={projectForm.description}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, description: event.target.value }))
+                  }
+                  className="mt-2 h-24 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-600">
+                Goals
+                <textarea
+                  value={projectForm.goals}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, goals: event.target.value }))
+                  }
+                  className="mt-2 h-24 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-600">
+                North Star Metric
+                <input
+                  value={projectForm.north_star_metric}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, north_star_metric: event.target.value }))
+                  }
+                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-600">
+                Target Personas
+                <input
+                  value={projectForm.target_personas}
+                  onChange={(event) =>
+                    setProjectForm((prev) => ({ ...prev, target_personas: event.target.value }))
+                  }
+                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  placeholder="Comma-separated (e.g. Product Managers, Designers)"
+                />
+              </label>
+              {projectSaveMessage && (
+                <p className="rounded-2xl bg-slate-100 px-4 py-2 text-sm text-slate-500">
+                  {projectSaveMessage}
+                </p>
+              )}
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingProject(false)}
+                  className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={projectSaving}
+                  className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {projectSaving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

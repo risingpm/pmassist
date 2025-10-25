@@ -4,9 +4,11 @@ from openai import OpenAI
 import os
 import json
 from dotenv import load_dotenv
+from uuid import UUID
 
 from .database import get_db
 from .models import Project, Roadmap
+from .workspaces import get_project_in_workspace
 
 # Load environment variables
 load_dotenv()
@@ -16,8 +18,8 @@ router = APIRouter()
 
 
 @router.post("/projects/{id}/roadmap")
-def generate_roadmap(id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == id).first()
+def generate_roadmap(id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
+    project = get_project_in_workspace(db, id, workspace_id) if workspace_id else db.query(Project).filter(Project.id == id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -58,12 +60,15 @@ def generate_roadmap(id: str, db: Session = Depends(get_db)):
     roadmap_json = json.loads(response.choices[0].message.content)
 
     # Deactivate old roadmaps
-    db.query(Roadmap).filter(
-        Roadmap.project_id == id, Roadmap.is_active == True
-    ).update({"is_active": False})
+    query = db.query(Roadmap).filter(Roadmap.project_id == id, Roadmap.is_active == True)
+    if project.workspace_id:
+        query = query.filter(Roadmap.workspace_id == project.workspace_id)
+    else:
+        query = query.filter(Roadmap.workspace_id == None)
+    query.update({"is_active": False})
 
     # Save new roadmap
-    roadmap = Roadmap(project_id=id, content=roadmap_json, is_active=True)
+    roadmap = Roadmap(project_id=id, workspace_id=project.workspace_id, content=roadmap_json, is_active=True)
     db.add(roadmap)
     db.commit()
     db.refresh(roadmap)
@@ -72,10 +77,23 @@ def generate_roadmap(id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{id}/roadmap")
-def get_active_roadmap(id: str, db: Session = Depends(get_db)):
-    roadmap = db.query(Roadmap).filter(
-        Roadmap.project_id == id, Roadmap.is_active == True
-    ).first()
+def get_active_roadmap(id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
+    if workspace_id:
+        project = get_project_in_workspace(db, id, workspace_id)
+        scope = project.workspace_id
+    else:
+        project = db.query(Project).filter(Project.id == id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        scope = None
+
+    query = db.query(Roadmap).filter(Roadmap.project_id == id, Roadmap.is_active == True)
+    if scope:
+        query = query.filter(Roadmap.workspace_id == scope)
+    else:
+        query = query.filter(Roadmap.workspace_id == None)
+
+    roadmap = query.first()
     if not roadmap:
         raise HTTPException(status_code=404, detail="No roadmap found")
     return roadmap

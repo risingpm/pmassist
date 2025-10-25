@@ -2,12 +2,14 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from uuid import UUID
 from .database import Base, engine, SessionLocal, get_db
 from backend.knowledge import documents, search
+from backend.knowledge import roadmap_ai
 from .database import Base, engine, SessionLocal
 from .models import Project
-from . import roadmap   # 👈 NEW: import roadmap endpoints
-from . import prd
+from . import prd, agent, auth, models
+from .workspaces import workspaces_router, user_workspaces_router
 
 # Create tables if they don’t already exist
 Base.metadata.create_all(bind=engine)
@@ -39,6 +41,8 @@ class ProjectCreate(BaseModel):
     description: str
     goals: str
     north_star_metric: str | None = None
+    target_personas: list[str] | None = None
+    workspace_id: UUID
 
 
 class ProjectUpdate(BaseModel):
@@ -46,6 +50,8 @@ class ProjectUpdate(BaseModel):
     description: str
     goals: str
     north_star_metric: str | None = None
+    workspace_id: UUID | None = None
+    target_personas: list[str] | None = None
 
 # -----------------------------
 # Routes
@@ -59,11 +65,17 @@ def health_check():
 # Create project
 @app.post("/projects")
 def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
+    workspace = db.query(models.Workspace).filter(models.Workspace.id == project.workspace_id).first()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
     db_project = Project(
         title=project.title,
         description=project.description,
         goals=project.goals,
-        north_star_metric=project.north_star_metric
+        north_star_metric=project.north_star_metric,
+        target_personas=project.target_personas,
+        workspace_id=project.workspace_id,
     )
     db.add(db_project)
     db.commit()
@@ -72,14 +84,16 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
         "title": db_project.title,
         "description": db_project.description,
         "goals": db_project.goals,
-        "north_star_metric": db_project.north_star_metric
+        "north_star_metric": db_project.north_star_metric,
+        "target_personas": db_project.target_personas,
+        "workspace_id": db_project.workspace_id,
     }}
 
 
 # List all projects
 @app.get("/projects")
-def list_projects(db: Session = Depends(get_db)):
-    projects = db.query(Project).all()
+def list_projects(workspace_id: UUID, db: Session = Depends(get_db)):
+    projects = db.query(Project).filter(Project.workspace_id == workspace_id).all()
     return {"projects": [
         {
             "id": p.id,
@@ -87,6 +101,8 @@ def list_projects(db: Session = Depends(get_db)):
             "description": p.description,
             "goals": p.goals,
             "north_star_metric": p.north_star_metric,
+            "target_personas": p.target_personas,
+            "workspace_id": p.workspace_id,
         }
         for p in projects
     ]}
@@ -94,22 +110,30 @@ def list_projects(db: Session = Depends(get_db)):
 
 # Get a single project
 @app.get("/projects/{project_id}")
-def get_project(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def get_project(project_id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
+    query = db.query(Project).filter(Project.id == project_id)
+    if workspace_id:
+        query = query.filter(Project.workspace_id == workspace_id)
+    project = query.first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"id": project.id, "project": {
         "title": project.title,
         "description": project.description,
         "goals": project.goals,
-        "north_star_metric": project.north_star_metric
+        "north_star_metric": project.north_star_metric,
+        "target_personas": project.target_personas,
+        "workspace_id": project.workspace_id,
     }}
 
 
 # Update project
 @app.put("/projects/{project_id}")
-def update_project(project_id: str, project: ProjectUpdate, db: Session = Depends(get_db)):
-    db_project = db.query(Project).filter(Project.id == project_id).first()
+def update_project(project_id: str, project: ProjectUpdate, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
+    query = db.query(Project).filter(Project.id == project_id)
+    if workspace_id:
+        query = query.filter(Project.workspace_id == workspace_id)
+    db_project = query.first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -117,6 +141,8 @@ def update_project(project_id: str, project: ProjectUpdate, db: Session = Depend
     db_project.description = project.description
     db_project.goals = project.goals
     db_project.north_star_metric = project.north_star_metric
+    if project.target_personas is not None:
+        db_project.target_personas = project.target_personas
     db.commit()
     db.refresh(db_project)
 
@@ -124,14 +150,19 @@ def update_project(project_id: str, project: ProjectUpdate, db: Session = Depend
         "title": db_project.title,
         "description": db_project.description,
         "goals": db_project.goals,
-        "north_star_metric": db_project.north_star_metric
+        "north_star_metric": db_project.north_star_metric,
+        "target_personas": db_project.target_personas,
+        "workspace_id": db_project.workspace_id,
     }}
 
 
 # Delete project
 @app.delete("/projects/{project_id}")
-def delete_project(project_id: str, db: Session = Depends(get_db)):
-    db_project = db.query(Project).filter(Project.id == project_id).first()
+def delete_project(project_id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
+    query = db.query(Project).filter(Project.id == project_id)
+    if workspace_id:
+        query = query.filter(Project.workspace_id == workspace_id)
+    db_project = query.first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -142,16 +173,13 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
 
 
 # -----------------------------
-# Include Roadmap Router
+# Include Feature Routers
 # -----------------------------
-app.include_router(roadmap.router)
-
+app.include_router(roadmap_ai.router)
 app.include_router(documents.router)
 app.include_router(search.router)
-
-from backend.knowledge import documents, roadmap_ai
-
-app.include_router(documents.router)
-app.include_router(roadmap_ai.router)
-
 app.include_router(prd.router)
+app.include_router(agent.router)
+app.include_router(workspaces_router)
+app.include_router(user_workspaces_router)
+app.include_router(auth.router)
