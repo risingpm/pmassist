@@ -2,13 +2,36 @@ import React, { useEffect, useMemo, useState } from "react";
 import SafeMarkdown from "./SafeMarkdown";
 import PRDList from "./PRDList";
 import PRDDetail from "./PRDDetail";
+import ProjectComments from "./ProjectComments";
+import ProjectLinks from "./ProjectLinks";
+import ProjectPrototypes from "./ProjectPrototypes";
+import ProjectPrototypeAgent from "./ProjectPrototypeAgent";
 import {
   getProject,
   fetchRoadmap as fetchSavedRoadmap,
   generateRoadmapChat,
   updateRoadmap,
   updateProject,
+  getProjectComments,
+  createProjectComment,
+  updateProjectComment,
+  deleteProjectComment,
+  getProjectLinks,
+  createProjectLink,
+  deleteProjectLink,
+  getPrototypes,
+  generatePrototype,
+  generatePrototypeBatch,
+  deletePrototype,
+  deleteAllPrototypes,
+  getPrototypeSessions,
+  createPrototypeSession,
+  sendPrototypeAgentMessage,
   type ChatMessage,
+  type ProjectComment,
+  type ProjectLink,
+  type PrototypeSession,
+  type Prototype,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
 
@@ -131,13 +154,29 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
     target_personas?: string[] | null;
   } | null>(null);
 
-  const [activeTab, setActiveTab] = useState<"documents" | "roadmap" | "prd">(
-    "documents"
+  const [activeTab, setActiveTab] = useState<"knowledge" | "roadmap" | "prototypes" | "prd">(
+    "knowledge"
   );
+  const [knowledgeTab, setKnowledgeTab] = useState<
+    "documents" | "comments" | "links" | "insights"
+  >("documents");
   const [selectedPrd, setSelectedPrd] = useState<{
     projectId: string;
     prdId: string;
   } | null>(null);
+
+  const [comments, setComments] = useState<ProjectComment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [links, setLinks] = useState<ProjectLink[]>([]);
+  const [loadingLinks, setLoadingLinks] = useState(false);
+  const [prototypes, setPrototypes] = useState<Prototype[]>([]);
+  const [loadingPrototypes, setLoadingPrototypes] = useState(false);
+  const [generatingPrototype, setGeneratingPrototype] = useState(false);
+  const [deletingAllPrototypes, setDeletingAllPrototypes] = useState(false);
+  const [prototypeSession, setPrototypeSession] = useState<PrototypeSession | null>(null);
+  const [loadingPrototypeSession, setLoadingPrototypeSession] = useState(false);
+  const [prototypeSessionError, setPrototypeSessionError] = useState<string | null>(null);
+  const [sendingPrototypeMessage, setSendingPrototypeMessage] = useState(false);
 
   // Roadmap interaction state
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
@@ -255,6 +294,262 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
     () => [...new Map(documents.map((d) => [d.filename, d])).values()],
     [documents]
   );
+
+  // ------------------- Comment handlers -------------------
+  const loadComments = async () => {
+    if (!effectiveWorkspaceId) {
+      setComments([]);
+      return;
+    }
+
+    setLoadingComments(true);
+    try {
+      const data = await getProjectComments(projectId, effectiveWorkspaceId);
+      setComments(data);
+    } catch (err) {
+      console.error("Failed to fetch project comments", err);
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+
+  const handleCreateComment = async (content: string, tags: string[]) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    await createProjectComment(projectId, effectiveWorkspaceId, {
+      content,
+      tags: tags.length > 0 ? tags : undefined,
+      author_id: userId ?? null,
+    });
+    await loadComments();
+  };
+
+  const handleUpdateComment = async (id: string, content: string, tags: string[]) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    await updateProjectComment(projectId, effectiveWorkspaceId, id, {
+      content,
+      tags: tags.length > 0 ? tags : [],
+    });
+    await loadComments();
+  };
+
+  const handleDeleteComment = async (id: string) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    await deleteProjectComment(projectId, effectiveWorkspaceId, id);
+    await loadComments();
+  };
+
+  // ------------------- Link handlers -------------------
+  const loadLinks = async () => {
+    if (!effectiveWorkspaceId) {
+      setLinks([]);
+      return;
+    }
+
+    setLoadingLinks(true);
+    try {
+      const data = await getProjectLinks(projectId, effectiveWorkspaceId);
+      setLinks(data);
+    } catch (err) {
+      console.error("Failed to fetch project links", err);
+    } finally {
+      setLoadingLinks(false);
+    }
+  };
+
+  const handleCreateLink = async (payload: {
+    label: string;
+    url: string;
+    description?: string;
+    tags?: string[];
+  }) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    await createProjectLink(projectId, {
+      ...payload,
+      workspace_id: effectiveWorkspaceId,
+    });
+    await loadLinks();
+  };
+
+  const handleDeleteLink = async (linkId: string) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    await deleteProjectLink(projectId, effectiveWorkspaceId, linkId);
+    await loadLinks();
+  };
+
+  const loadPrototypes = async () => {
+    if (!effectiveWorkspaceId) {
+      setPrototypes([]);
+      return;
+    }
+    setLoadingPrototypes(true);
+    try {
+      const data = await getPrototypes(projectId, effectiveWorkspaceId);
+      setPrototypes(data);
+    } catch (err) {
+      console.error("Failed to fetch prototypes", err);
+    } finally {
+      setLoadingPrototypes(false);
+    }
+  };
+
+  const handleGeneratePrototype = async ({ phase, focus, count }: { phase: string; focus: string; count: number }) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    setGeneratingPrototype(true);
+    try {
+      const normalizedCount = Math.max(1, count || 1);
+      const requestPayload = {
+        phase: phase || undefined,
+        focus: focus || undefined,
+        count: normalizedCount,
+      };
+      if (normalizedCount > 1) {
+        await generatePrototypeBatch(projectId, effectiveWorkspaceId, requestPayload);
+      } else {
+        await generatePrototype(projectId, effectiveWorkspaceId, requestPayload);
+      }
+      await Promise.all([loadPrototypes(), loadPrototypeSessions()]);
+    } catch (err) {
+      throw err;
+    } finally {
+      setGeneratingPrototype(false);
+    }
+  };
+
+  const handleDeletePrototype = async (prototypeId: string) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    await deletePrototype(projectId, effectiveWorkspaceId, prototypeId);
+    await Promise.all([loadPrototypes(), loadPrototypeSessions()]);
+  };
+
+  const handleDeleteAllPrototypes = async () => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    setDeletingAllPrototypes(true);
+    try {
+      await deleteAllPrototypes(projectId, effectiveWorkspaceId, true);
+      setPrototypeSession(null);
+      await Promise.all([loadPrototypes(), loadPrototypeSessions()]);
+    } catch (err) {
+      console.error("Failed to delete prototypes", err);
+      throw err;
+    } finally {
+      setDeletingAllPrototypes(false);
+    }
+  };
+
+  const loadPrototypeSessions = async () => {
+    if (!effectiveWorkspaceId) {
+      setPrototypeSession(null);
+      return;
+    }
+
+    setPrototypeSessionError(null);
+    setLoadingPrototypeSession(true);
+    try {
+      const sessions = await getPrototypeSessions(projectId, effectiveWorkspaceId);
+      setPrototypeSession(sessions.length > 0 ? sessions[0] : null);
+    } catch (err) {
+      console.error("Failed to fetch prototype sessions", err);
+      setPrototypeSessionError(err instanceof Error ? err.message : "Unable to load prototype sessions");
+    } finally {
+      setLoadingPrototypeSession(false);
+    }
+  };
+
+  const handleStartPrototypeSession = async (prompt: string) => {
+    if (!effectiveWorkspaceId) {
+      throw new Error("Missing workspace context");
+    }
+
+    setPrototypeSessionError(null);
+    setLoadingPrototypeSession(true);
+    try {
+      const session = await createPrototypeSession(projectId, effectiveWorkspaceId, prompt);
+      setPrototypeSession(session);
+      await loadPrototypes();
+    } catch (err) {
+      console.error("Failed to start prototype session", err);
+      setPrototypeSessionError(err instanceof Error ? err.message : "Unable to start prototype session");
+      throw err;
+    } finally {
+      setLoadingPrototypeSession(false);
+    }
+  };
+
+  const handleSendPrototypeMessage = async (message: string) => {
+    if (!effectiveWorkspaceId || !prototypeSession) {
+      throw new Error("Missing session context");
+    }
+
+    setPrototypeSessionError(null);
+    setSendingPrototypeMessage(true);
+    try {
+      const updated = await sendPrototypeAgentMessage(
+        projectId,
+        prototypeSession.id,
+        effectiveWorkspaceId,
+        message
+      );
+      setPrototypeSession(updated);
+      await loadPrototypes();
+    } catch (err) {
+      console.error("Failed to send prototype agent message", err);
+      setPrototypeSessionError(err instanceof Error ? err.message : "Unable to send agent message");
+      throw err;
+    } finally {
+      setSendingPrototypeMessage(false);
+    }
+  };
+
+  const knowledgeSummary = useMemo(() => {
+    const latestDocument = documents.reduce<Document | null>((acc, doc) => {
+      if (!acc) return doc;
+      const currentTime = new Date(doc.uploaded_at).getTime();
+      const accTime = new Date(acc.uploaded_at).getTime();
+      return currentTime > accTime ? doc : acc;
+    }, null);
+
+    const latestComment = comments.length > 0 ? comments[0] : null;
+    const latestLink = links.length > 0 ? links[0] : null;
+    const latestPrototype = prototypes.length > 0 ? prototypes[0] : null;
+
+    return {
+      totalDocuments: groupedDocuments.length,
+      totalDocumentChunks: documents.length,
+      latestDocumentUploadedAt: latestDocument
+        ? new Date(latestDocument.uploaded_at).toLocaleString()
+        : null,
+      totalComments: comments.length,
+      latestComment,
+      totalLinks: links.length,
+      latestLink,
+      totalPrototypes: prototypes.length,
+      latestPrototype,
+    };
+  }, [documents, groupedDocuments, comments, links, prototypes]);
 
   // ------------------- Roadmap handlers -------------------
   const loadRoadmap = async () => {
@@ -428,8 +723,17 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
 
   useEffect(() => {
     fetchDocuments();
+    loadComments();
+    loadLinks();
     loadRoadmap();
+    loadPrototypes();
   }, [projectId, effectiveWorkspaceId]);
+
+  useEffect(() => {
+    if (activeTab === "prototypes") {
+      loadPrototypeSessions();
+    }
+  }, [activeTab, projectId, effectiveWorkspaceId]);
 
   // ------------------- Render -------------------
   if (!effectiveWorkspaceId) {
@@ -496,14 +800,14 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
 
         <div className="mt-8 flex gap-6 border-b border-slate-200 pb-3 text-sm font-semibold text-slate-500">
           <button
-            onClick={() => setActiveTab("documents")}
+            onClick={() => setActiveTab("knowledge")}
             className={
-              activeTab === "documents"
+              activeTab === "knowledge"
                 ? "border-b-2 border-blue-600 pb-2 text-blue-600"
                 : "pb-2 hover:text-slate-700"
             }
           >
-            Documents
+            Knowledge Base
           </button>
           <button
             onClick={() => setActiveTab("roadmap")}
@@ -514,6 +818,16 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
             }
           >
             Roadmap
+          </button>
+          <button
+            onClick={() => setActiveTab("prototypes")}
+            className={
+              activeTab === "prototypes"
+                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
+                : "pb-2 hover:text-slate-700"
+            }
+          >
+            Prototypes
           </button>
           <button
             onClick={() => setActiveTab("prd")}
@@ -527,64 +841,284 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
           </button>
         </div>
 
-        {activeTab === "documents" && (
+        {activeTab === "knowledge" && (
           <section className="mt-6 space-y-6">
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-900">Project Documents</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Upload supporting artefacts to improve roadmap and PRD quality.
-              </p>
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <input
-                  type="file"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="text-sm"
-                />
-                <button
-                  onClick={handleUpload}
-                  disabled={loadingDocs}
-                  className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-                >
-                  {loadingDocs ? "Uploading..." : "Upload"}
-                </button>
-                <button
-                  onClick={handleEmbed}
-                  disabled={loadingDocs}
-                  className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-60"
-                >
-                  Embed
-                </button>
-              </div>
+            <div className="flex flex-wrap gap-4 border-b border-slate-200 pb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <button
+                onClick={() => setKnowledgeTab("documents")}
+                className={
+                  knowledgeTab === "documents"
+                    ? "rounded-full bg-blue-50 px-4 py-2 text-blue-600"
+                    : "rounded-full px-4 py-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                }
+              >
+                Documents
+              </button>
+              <button
+                onClick={() => setKnowledgeTab("comments")}
+                className={
+                  knowledgeTab === "comments"
+                    ? "rounded-full bg-blue-50 px-4 py-2 text-blue-600"
+                    : "rounded-full px-4 py-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                }
+              >
+                Comments
+              </button>
+              <button
+                onClick={() => setKnowledgeTab("links")}
+                className={
+                  knowledgeTab === "links"
+                    ? "rounded-full bg-blue-50 px-4 py-2 text-blue-600"
+                    : "rounded-full px-4 py-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                }
+              >
+                Links
+              </button>
+              <button
+                onClick={() => setKnowledgeTab("insights")}
+                className={
+                  knowledgeTab === "insights"
+                    ? "rounded-full bg-blue-50 px-4 py-2 text-blue-600"
+                    : "rounded-full px-4 py-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                }
+              >
+                Insights
+              </button>
             </div>
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-800">Uploaded Files</h3>
-              {groupedDocuments.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No documents uploaded yet.</p>
-              ) : (
-                <ul className="mt-4 space-y-3">
-                  {groupedDocuments.map((doc) => (
-                    <li
-                      key={doc.id}
-                      className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            {knowledgeTab === "documents" && (
+              <div className="space-y-6">
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h2 className="text-xl font-semibold text-slate-900">Project Documents</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Upload supporting artefacts to improve roadmap and PRD quality.
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <input
+                      type="file"
+                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                      className="text-sm"
+                    />
+                    <button
+                      onClick={handleUpload}
+                      disabled={loadingDocs}
+                      className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
                     >
+                      {loadingDocs ? "Uploading..." : "Upload"}
+                    </button>
+                    <button
+                      onClick={handleEmbed}
+                      disabled={loadingDocs}
+                      className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-60"
+                    >
+                      Embed
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-800">Uploaded Files</h3>
+                  {groupedDocuments.length === 0 ? (
+                    <p className="mt-3 text-sm text-slate-500">No documents uploaded yet.</p>
+                  ) : (
+                    <ul className="mt-4 space-y-3">
+                      {groupedDocuments.map((doc) => (
+                        <li
+                          key={doc.id}
+                          className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                        >
+                          <div>
+                            <p className="font-medium text-slate-800">{doc.filename}</p>
+                            <p className="text-xs text-slate-500">
+                              Uploaded {new Date(doc.uploaded_at).toLocaleString()}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteDocument(doc.id)}
+                            className="text-sm font-semibold text-rose-500 transition hover:text-rose-600"
+                          >
+                            Delete
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {knowledgeTab === "comments" && (
+              <ProjectComments
+                comments={comments}
+                isLoading={loadingComments}
+                onCreate={handleCreateComment}
+                onUpdate={handleUpdateComment}
+                onDelete={handleDeleteComment}
+              />
+            )}
+
+            {knowledgeTab === "links" && (
+              <ProjectLinks
+                links={links}
+                isLoading={loadingLinks}
+                onCreate={handleCreateLink}
+                onDelete={handleDeleteLink}
+              />
+            )}
+
+            {knowledgeTab === "insights" && (
+              <section className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-5">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Documents
+                    </p>
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {knowledgeSummary.totalDocuments}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {knowledgeSummary.totalDocumentChunks} chunk{knowledgeSummary.totalDocumentChunks === 1 ? "" : "s"} indexed
+                    </p>
+                    <p className="mt-2 text-xs text-slate-400">
+                      {knowledgeSummary.latestDocumentUploadedAt
+                        ? `Last upload ${knowledgeSummary.latestDocumentUploadedAt}`
+                        : "No uploads yet"}
+                    </p>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Conversations
+                    </p>
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {knowledgeSummary.totalComments}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Insight{knowledgeSummary.totalComments === 1 ? "" : "s"} captured across the project
+                    </p>
+                      {knowledgeSummary.latestComment && (
+                        <p
+                          className="mt-2 overflow-hidden text-ellipsis text-xs italic text-slate-500"
+                          style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}
+                        >
+                          “{knowledgeSummary.latestComment.content}”
+                        </p>
+                      )}
+                    </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Prototypes
+                    </p>
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {knowledgeSummary.totalPrototypes ?? 0}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Clickable concepts generated from your roadmap
+                    </p>
+                    {knowledgeSummary.latestPrototype ? (
+                      <p className="mt-2 text-xs text-slate-400">
+                        Latest {new Date(knowledgeSummary.latestPrototype.created_at).toLocaleString()}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-400">Generate a prototype to see it here.</p>
+                    )}
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Links
+                    </p>
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {knowledgeSummary.totalLinks ?? 0}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">References snapped to this project</p>
+                    {knowledgeSummary.latestLink ? (
+                      <div className="mt-2 text-xs text-slate-400">
+                        <p className="text-slate-500 text-sm">{knowledgeSummary.latestLink.label}</p>
+                        <p>Latest {new Date(knowledgeSummary.latestLink.created_at).toLocaleString()}</p>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-400">Add a link to see it here.</p>
+                    )}
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Product Snapshot
+                    </p>
+                    <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                      <li>
+                        <span className="font-semibold text-slate-700">North Star:</span>{" "}
+                        {projectInfo?.north_star_metric || "Not specified"}
+                      </li>
+                      <li>
+                        <span className="font-semibold text-slate-700">Personas:</span>{" "}
+                        {projectInfo?.target_personas && projectInfo.target_personas.length > 0
+                          ? projectInfo.target_personas.join(", ")
+                          : "Not specified"}
+                      </li>
+                      <li>
+                        <span className="font-semibold text-slate-700">Goals:</span>{" "}
+                        {projectInfo?.goals || "Not documented"}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-800">Latest Comment Detail</h3>
+                  {knowledgeSummary.latestComment ? (
+                    <div className="mt-3 space-y-2 text-sm text-slate-600">
+                      <p>{knowledgeSummary.latestComment.content}</p>
+                      {knowledgeSummary.latestComment.tags && knowledgeSummary.latestComment.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {knowledgeSummary.latestComment.tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-600"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-slate-400">
+                        {new Date(knowledgeSummary.latestComment.created_at).toLocaleString()}
+                        {knowledgeSummary.latestComment.author_id ? " · Saved by teammate" : ""}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">
+                      Capture a comment to generate shared context for the team.
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-800">Latest Prototype Snapshot</h3>
+                  {knowledgeSummary.latestPrototype ? (
+                    <div className="mt-3 space-y-3 text-sm text-slate-600">
                       <div>
-                        <p className="font-medium text-slate-800">{doc.filename}</p>
-                        <p className="text-xs text-slate-500">
-                          Uploaded {new Date(doc.uploaded_at).toLocaleString()}
+                        <p className="text-base font-semibold text-slate-800">
+                          {knowledgeSummary.latestPrototype.title}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {new Date(knowledgeSummary.latestPrototype.created_at).toLocaleString()}
+                          {knowledgeSummary.latestPrototype.phase ? ` · ${knowledgeSummary.latestPrototype.phase}` : ""}
                         </p>
                       </div>
-                      <button
-                        onClick={() => handleDeleteDocument(doc.id)}
-                        className="text-sm font-semibold text-rose-500 transition hover:text-rose-600"
-                      >
-                        Delete
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                      <p>{knowledgeSummary.latestPrototype.summary}</p>
+                      {knowledgeSummary.latestPrototype.spec?.key_screens?.slice(0, 2).map((screen) => (
+                        <div key={`${knowledgeSummary.latestPrototype?.id}-${screen.name}`} className="rounded-2xl bg-slate-100 p-3">
+                          <p className="text-sm font-semibold text-slate-800">{screen.name}</p>
+                          <p className="text-xs text-slate-500">{screen.goal}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">
+                      Generate a prototype to start visualizing your roadmap phases.
+                    </p>
+                  )}
+                </div>
+              </section>
+            )}
           </section>
         )}
 
@@ -662,6 +1196,28 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
           </section>
         )}
 
+        {activeTab === "prototypes" && (
+          <section className="mt-6 space-y-6">
+            <ProjectPrototypeAgent
+              session={prototypeSession}
+              loading={loadingPrototypeSession || loadingPrototypes}
+              sending={sendingPrototypeMessage}
+              error={prototypeSessionError}
+              onStart={handleStartPrototypeSession}
+              onSend={handleSendPrototypeMessage}
+            />
+            <ProjectPrototypes
+              prototypes={prototypes}
+              loading={loadingPrototypes}
+              onGenerate={handleGeneratePrototype}
+              generating={generatingPrototype}
+              onDelete={handleDeletePrototype}
+              onDeleteAll={handleDeleteAllPrototypes}
+              deletingAll={deletingAllPrototypes}
+            />
+          </section>
+        )}
+
         {activeTab === "prd" && (
           <section className="mt-6">
             {!selectedPrd ? (
@@ -671,7 +1227,10 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                 onSelectPrd={(projId, id) =>
                   setSelectedPrd({ projectId: projId, prdId: id })
                 }
-                onBack={() => setActiveTab("documents")}
+                onBack={() => {
+                  setActiveTab("knowledge");
+                  setKnowledgeTab("documents");
+                }}
               />
             ) : (
               <PRDDetail

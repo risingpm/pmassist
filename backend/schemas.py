@@ -177,3 +177,166 @@ class ForgotPasswordResponse(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
+
+
+# ---------------------------------------------------------
+# Project comments
+# ---------------------------------------------------------
+
+
+class ProjectCommentBase(BaseModel):
+    content: str = Field(min_length=1)
+    tags: list[str] | None = None
+
+
+class ProjectCommentCreate(ProjectCommentBase):
+    author_id: UUID | None = None
+
+
+class ProjectCommentUpdate(BaseModel):
+    content: str | None = None
+    tags: list[str] | None = None
+
+
+class ProjectCommentResponse(ProjectCommentBase):
+    id: UUID
+    project_id: str
+    workspace_id: UUID | None = None
+    author_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------
+# Prototypes
+# ---------------------------------------------------------
+
+
+class PrototypeComponent(BaseModel):
+    kind: Literal[
+        "hero",
+        "form",
+        "list",
+        "cta",
+        "stats",
+        "custom",
+        "navigation",
+        "modal",
+    ]
+    title: str | None = None
+    description: str | None = None
+    fields: list[str] | None = None
+    actions: list[str] = Field(default_factory=list)
+    sample_items: list[str] | None = None
+    dataset: list[dict[str, Any]] | None = None
+
+
+class PrototypeScreen(BaseModel):
+    name: str
+    goal: str
+    primary_actions: list[str]
+    layout_notes: str | None = None
+    components: list[PrototypeComponent] = Field(default_factory=list)
+
+
+class PrototypeSpec(BaseModel):
+    title: str
+    summary: str
+    goal: str | None = None
+    success_metrics: list[str] | None = None
+    key_screens: list[PrototypeScreen]
+    user_flow: list[str] | None = None
+    visual_style: str | None = None
+    call_to_action: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class PrototypeResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    roadmap_id: UUID | None
+    roadmap_version: int | None
+    phase: str | None
+    title: str
+    summary: str
+    spec: PrototypeSpec
+    html_preview: str | None = None
+    bundle_url: str | None = None
+    workspace_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PrototypeGenerateRequest(BaseModel):
+    workspace_id: UUID
+    phase: str | None = None
+    focus: str | None = None
+    count: int | None = 1
+
+
+# ---------------------------------------------------------
+# Project links
+# ---------------------------------------------------------
+
+
+class ProjectLinkBase(BaseModel):
+    label: str
+    url: str
+    description: str | None = None
+    tags: list[str] | None = None
+
+
+class ProjectLinkCreate(ProjectLinkBase):
+    workspace_id: UUID
+
+
+class ProjectLinkResponse(ProjectLinkBase):
+    id: UUID
+    project_id: str
+    workspace_id: UUID | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------
+# Prototype sessions (agent)
+# ---------------------------------------------------------
+
+
+class PrototypeAgentMessage(BaseModel):
+    id: UUID
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime
+
+
+class PrototypeSessionResponse(BaseModel):
+    id: UUID
+    project_id: str
+    workspace_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    latest_spec: PrototypeSpec | None = None
+    bundle_url: str | None = None
+    messages: list[PrototypeAgentMessage]
+
+    class Config:
+        from_attributes = True
+
+
+class PrototypeSessionCreateRequest(BaseModel):
+    workspace_id: UUID
+    prompt: str | None = None
+
+
+class PrototypeSessionMessageRequest(BaseModel):
+    workspace_id: UUID
+    message: str
