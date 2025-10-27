@@ -93,15 +93,6 @@ const toApiPayload = (form: FormState): UserAgentPayload => ({
   ),
 });
 
-const STEPS = [
-  { label: "Welcome" },
-  { label: "Name" },
-  { label: "Personality" },
-  { label: "Focus" },
-  { label: "Integrations" },
-  { label: "Account" },
-];
-
 export default function OnboardingPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -328,11 +319,11 @@ export default function OnboardingPage() {
     setIsSubmitting(true);
     setSubmitError(null);
 
+    let resultingWorkspaceId = workspaceId;
+
     try {
       let activeUserId = resolvedUserId;
       let currentAgentExists = agentExists;
-      let resultingWorkspaceId = workspaceId;
-      let resultingWorkspaceName = workspaceName;
 
       if (!activeUserId) {
         const trimmedEmail = authEmail.trim().toLowerCase();
@@ -362,7 +353,6 @@ export default function OnboardingPage() {
         if (newWorkspaceId) setWorkspaceId(newWorkspaceId);
         if (newWorkspaceName) setWorkspaceName(newWorkspaceName);
         if (newWorkspaceId) resultingWorkspaceId = newWorkspaceId;
-        if (newWorkspaceName) resultingWorkspaceName = newWorkspaceName;
 
         const agentCheck = await getUserAgent(authResult.id);
         currentAgentExists = Boolean(agentCheck);
@@ -423,7 +413,6 @@ export default function OnboardingPage() {
             if (authResult.workspace_name) {
               window.sessionStorage.setItem(WORKSPACE_NAME_KEY, authResult.workspace_name);
               setWorkspaceName(authResult.workspace_name);
-              resultingWorkspaceName = authResult.workspace_name;
             }
           }
           setSubmitError("Email already in use. Signed you in instead; please continue.");

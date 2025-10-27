@@ -81,6 +81,10 @@ class Project(Base):
     )
     prds = relationship("PRD", back_populates="project", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
+    comments = relationship("ProjectComment", back_populates="project", cascade="all, delete-orphan")
+    prototypes = relationship("Prototype", back_populates="project", cascade="all, delete-orphan")
+    links = relationship("ProjectLink", back_populates="project", cascade="all, delete-orphan")
+    prototype_sessions = relationship("PrototypeSession", back_populates="project", cascade="all, delete-orphan")
     workspace = relationship("Workspace", back_populates="projects")
 
 
@@ -89,7 +93,7 @@ class Roadmap(Base):
     __tablename__ = "roadmaps"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -116,7 +120,7 @@ class PRD(Base):
     __tablename__ = "prds"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
 
     # 🔹 NEW: store full Markdown PRD as plain text
     content = Column(String, nullable=True)  
@@ -179,3 +183,84 @@ class PasswordResetToken(Base):
     used_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="reset_tokens")
+
+
+class ProjectComment(Base):
+    __tablename__ = "project_comments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    author_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    content = Column(Text, nullable=False)
+    tags = Column(ARRAY(String), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="comments")
+    author = relationship("User")
+
+
+class Prototype(Base):
+    __tablename__ = "prototypes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    roadmap_id = Column(UUID(as_uuid=True), ForeignKey("roadmaps.id", ondelete="SET NULL"), nullable=True)
+    roadmap_version = Column(Integer, nullable=True)
+    phase = Column(String, nullable=True)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=False)
+    spec = Column(JSONB, nullable=False)
+    html_preview = Column(Text, nullable=True)
+    bundle_path = Column(String, nullable=True)
+    bundle_url = Column(String, nullable=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="prototypes")
+
+
+class ProjectLink(Base):
+    __tablename__ = "project_links"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    label = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    tags = Column(ARRAY(String), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="links")
+
+
+class PrototypeSession(Base):
+    __tablename__ = "prototype_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    title = Column(String, nullable=True)
+    latest_spec = Column(JSONB, nullable=True)
+    latest_bundle_path = Column(String, nullable=True)
+    latest_bundle_url = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="prototype_sessions")
+    messages = relationship("PrototypeMessage", back_populates="session", cascade="all, delete-orphan")
+
+
+class PrototypeMessage(Base):
+    __tablename__ = "prototype_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("prototype_sessions.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    session = relationship("PrototypeSession", back_populates="messages")

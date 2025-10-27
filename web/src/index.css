@@ -31,3 +31,64 @@ a {
     transform: translateY(0);
   }
 }
+
+.prototype {
+  display: block;
+  font-family: 'Inter', system-ui, sans-serif;
+  border-radius: 24px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  padding: 20px;
+}
+
+.prototype header {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.prototype-screen {
+  background: rgba(15, 23, 42, 0.04);
+  border-radius: 16px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.prototype-screen h3 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.prototype-screen .goal {
+  margin: 0 0 6px 0;
+  color: #475569;
+  font-size: 12px;
+}
+
+.prototype-screen ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #2563eb;
+}
+
+.prototype-screen .notes {
+  margin-top: 6px;
+  font-size: 12px;
+  font-style: italic;
+  color: #64748b;
+}
+
+.user-flow {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(15, 23, 42, 0.1);
+}
+
+.user-flow ol {
+  margin: 8px 0 0 18px;
+  color: #1e293b;
+  font-size: 13px;
+}

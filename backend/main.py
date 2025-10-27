@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from uuid import UUID
 from .database import Base, engine, SessionLocal, get_db
-from backend.knowledge import documents, search
+from backend.knowledge import documents, search, comments, prototypes, links, prototype_agent
 from backend.knowledge import roadmap_ai
 from .database import Base, engine, SessionLocal
 from .models import Project
@@ -15,6 +16,8 @@ from .workspaces import workspaces_router, user_workspaces_router
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="backend/static"), name="static")
 
 # CORS middleware (allow everything for now)
 app.add_middleware(
@@ -177,7 +180,11 @@ def delete_project(project_id: str, workspace_id: UUID | None = None, db: Sessio
 # -----------------------------
 app.include_router(roadmap_ai.router)
 app.include_router(documents.router)
+app.include_router(comments.router)
 app.include_router(search.router)
+app.include_router(prototypes.router)
+app.include_router(links.router)
+app.include_router(prototype_agent.router)
 app.include_router(prd.router)
 app.include_router(agent.router)
 app.include_router(workspaces_router)
