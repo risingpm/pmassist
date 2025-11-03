@@ -140,6 +140,156 @@ export type PrototypeSession = {
   messages: PrototypeAgentMessage[];
 };
 
+export type GitHubRepoContextEntry = {
+  id: string;
+  repo_id: string;
+  file_path: string;
+  content_summary: string;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type GitHubRepoInsight = {
+  id: string;
+  repo_id: string;
+  project_id?: string | null;
+  strategic_pillars?: Array<string | Record<string, unknown>> | null;
+  roadmap?: Record<string, unknown> | null;
+  prd_drafts?: Array<Record<string, unknown>> | null;
+  created_at: string;
+};
+
+export type GitHubRepoRecord = {
+  id: string;
+  connection_id: string;
+  workspace_id: string;
+  repo_name: string;
+  repo_full_name: string;
+  repo_url: string;
+  default_branch?: string | null;
+  last_synced?: string | null;
+  metadata?: Record<string, unknown> | null;
+  contexts: GitHubRepoContextEntry[];
+  insights: GitHubRepoInsight[];
+};
+
+export type GitHubConnectionRecord = {
+  id: string;
+  user_id: string;
+  workspace_id: string;
+  username?: string | null;
+  provider: string;
+  created_at: string;
+  repos: GitHubRepoRecord[];
+};
+
+export type KnowledgeEntryRecord = {
+  id: string;
+  workspace_id: string;
+  repo_id?: string | null;
+  project_id?: string | null;
+  source: string;
+  entry_type: string;
+  title: string;
+  content: string;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type GitHubWorkspaceContext = {
+  connections: GitHubConnectionRecord[];
+  knowledge_entries: KnowledgeEntryRecord[];
+};
+
+export type GitHubProjectContext = {
+  repo: GitHubRepoRecord | null;
+  available_repos: GitHubRepoRecord[];
+  knowledge_entries: KnowledgeEntryRecord[];
+};
+
+export async function startGitHubAuth(workspaceId: string, userId: string, redirectOverride?: string) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
+  if (redirectOverride) {
+    params.set("redirect_override", redirectOverride);
+  }
+  const res = await fetch(`${API_BASE}/integrations/github/auth?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to initiate GitHub OAuth");
+  return res.json() as Promise<{ authorize_url: string; state: string }>;
+}
+
+export async function fetchUserRepos(workspaceId: string, userId: string) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
+  const res = await fetch(`${API_BASE}/integrations/github/repos?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to load GitHub repositories");
+  return res.json() as Promise<{
+    available_repos: Array<Record<string, unknown>>;
+    connected_repos: GitHubRepoRecord[];
+    username?: string | null;
+  }>;
+}
+
+export async function syncGitHubRepo(
+  workspaceId: string,
+  userId: string,
+  payload: { repo_full_name: string; branch?: string | null; force?: boolean }
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
+  const res = await fetch(`${API_BASE}/integrations/github/sync?${params.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(body || "Failed to sync repository");
+  }
+  return res.json() as Promise<GitHubRepoRecord>;
+}
+
+export async function getGitHubContext(workspaceId: string) {
+  const res = await fetch(`${API_BASE}/integrations/github/context?workspace_id=${workspaceId}`);
+  if (!res.ok) throw new Error("Failed to load GitHub context");
+  return res.json() as Promise<GitHubWorkspaceContext>;
+}
+
+export async function getProjectGitHubContext(projectId: string, workspaceId: string) {
+  const res = await fetch(
+    `${API_BASE}/integrations/github/projects/${projectId}/context?workspace_id=${workspaceId}`
+  );
+  if (!res.ok) throw new Error("Failed to load project GitHub context");
+  return res.json() as Promise<GitHubProjectContext>;
+}
+
+export async function linkProjectGitHubRepo(projectId: string, workspaceId: string, repoId: string) {
+  const res = await fetch(
+    `${API_BASE}/integrations/github/projects/${projectId}/link?workspace_id=${workspaceId}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_id: repoId }),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to link repository");
+  }
+  return res.json() as Promise<GitHubProjectContext>;
+}
+
+export async function unlinkProjectGitHubRepo(projectId: string, workspaceId: string) {
+  const res = await fetch(
+    `${API_BASE}/integrations/github/projects/${projectId}/link?workspace_id=${workspaceId}`,
+    {
+      method: "DELETE",
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to unlink repository");
+  }
+  return res.json() as Promise<GitHubProjectContext>;
+}
+
 // ---------------- Projects ----------------
 export async function getProjects(workspaceId: string) {
   const res = await fetch(`${API_BASE}/projects?workspace_id=${workspaceId}`);
