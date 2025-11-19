@@ -34,3 +34,6 @@ __pycache__/
 # Env files
 .env
 
+# Local Postgres clusters
+backend/postgres-data/
+backend/postgres17-data/
