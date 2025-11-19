@@ -11,6 +11,7 @@ from .database import Base, engine, SessionLocal
 from .models import Project
 from . import prd, agent, auth, models
 from .workspaces import workspaces_router, user_workspaces_router
+from backend.rbac import ensure_membership
 
 # Create tables if they don’t already exist
 Base.metadata.create_all(bind=engine)
@@ -53,7 +54,7 @@ class ProjectUpdate(BaseModel):
     description: str
     goals: str
     north_star_metric: str | None = None
-    workspace_id: UUID | None = None
+    workspace_id: UUID
     target_personas: list[str] | None = None
 
 # -----------------------------
@@ -67,7 +68,8 @@ def health_check():
 
 # Create project
 @app.post("/projects")
-def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
+def create_project(project: ProjectCreate, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, project.workspace_id, user_id, required_role="editor")
     workspace = db.query(models.Workspace).filter(models.Workspace.id == project.workspace_id).first()
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -95,7 +97,8 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 
 # List all projects
 @app.get("/projects")
-def list_projects(workspace_id: UUID, db: Session = Depends(get_db)):
+def list_projects(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
     projects = db.query(Project).filter(Project.workspace_id == workspace_id).all()
     return {"projects": [
         {
@@ -113,10 +116,9 @@ def list_projects(workspace_id: UUID, db: Session = Depends(get_db)):
 
 # Get a single project
 @app.get("/projects/{project_id}")
-def get_project(project_id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
-    query = db.query(Project).filter(Project.id == project_id)
-    if workspace_id:
-        query = query.filter(Project.workspace_id == workspace_id)
+def get_project(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    query = db.query(Project).filter(Project.id == project_id, Project.workspace_id == workspace_id)
     project = query.first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -132,10 +134,15 @@ def get_project(project_id: str, workspace_id: UUID | None = None, db: Session =
 
 # Update project
 @app.put("/projects/{project_id}")
-def update_project(project_id: str, project: ProjectUpdate, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
-    query = db.query(Project).filter(Project.id == project_id)
-    if workspace_id:
-        query = query.filter(Project.workspace_id == workspace_id)
+def update_project(
+    project_id: str,
+    project: ProjectUpdate,
+    workspace_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    query = db.query(Project).filter(Project.id == project_id, Project.workspace_id == workspace_id)
     db_project = query.first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -161,10 +168,9 @@ def update_project(project_id: str, project: ProjectUpdate, workspace_id: UUID |
 
 # Delete project
 @app.delete("/projects/{project_id}")
-def delete_project(project_id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
-    query = db.query(Project).filter(Project.id == project_id)
-    if workspace_id:
-        query = query.filter(Project.workspace_id == workspace_id)
+def delete_project(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    query = db.query(Project).filter(Project.id == project_id, Project.workspace_id == workspace_id)
     db_project = query.first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")

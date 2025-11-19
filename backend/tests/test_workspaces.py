@@ -48,7 +48,7 @@ def test_create_workspace_with_owner(db_session):
     )
     assert len(membership) == 1
     assert membership[0].user_id == user.id
-    assert membership[0].role == "owner"
+    assert membership[0].role == "admin"
 
 
 def test_get_project_in_workspace(db_session):

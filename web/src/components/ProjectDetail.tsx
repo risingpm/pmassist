@@ -32,6 +32,7 @@ import {
   type ProjectLink,
   type PrototypeSession,
   type Prototype,
+  type WorkspaceRole,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
 
@@ -95,6 +96,7 @@ type Document = {
 type ProjectDetailProps = {
   projectId: string;
   workspaceId: string | null;
+  workspaceRole: WorkspaceRole;
   onProjectUpdated: (project: {
     id: string;
     title: string;
@@ -113,7 +115,13 @@ type RoadmapPreview = {
   updated_at: string;
 };
 
-export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated, onBack }: ProjectDetailProps) {
+export default function ProjectDetail({
+  projectId,
+  workspaceId,
+  workspaceRole,
+  onProjectUpdated,
+  onBack,
+}: ProjectDetailProps) {
   const userId = useMemo(() => {
     if (typeof window === "undefined") {
       return (import.meta.env.VITE_DEFAULT_USER_ID as string | undefined) ?? null;
@@ -142,6 +150,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
     if (typeof window === "undefined") return null;
     return window.sessionStorage.getItem(WORKSPACE_ID_KEY);
   }, [workspaceId]);
+  const canEditWorkspace = workspaceRole === "admin" || workspaceRole === "editor";
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [file, setFile] = useState<File | null>(null);
@@ -223,14 +232,14 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
 
   // ------------------- Document handlers -------------------
   const fetchDocuments = async () => {
-    if (!effectiveWorkspaceId) {
+    if (!effectiveWorkspaceId || !userId) {
       setDocuments([]);
       return;
     }
     setLoadingDocs(true);
     try {
       const res = await fetch(
-        `${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}`
+        `${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`
       );
       const data = await res.json();
       setDocuments(data);
@@ -242,7 +251,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file || !canEditWorkspace || !userId) return;
     setLoadingDocs(true);
 
     const formData = new FormData();
@@ -250,7 +259,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
 
     try {
       if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
-      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}`, {
+      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`, {
         method: "POST",
         body: formData,
       });
@@ -264,10 +273,11 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
   };
 
   const handleEmbed = async () => {
+    if (!canEditWorkspace || !userId) return;
     setLoadingDocs(true);
     try {
       if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
-      await fetch(`${import.meta.env.VITE_API_BASE}/documents/embed/${projectId}?workspace_id=${effectiveWorkspaceId}`, {
+      await fetch(`${import.meta.env.VITE_API_BASE}/documents/embed/${projectId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`, {
         method: "POST",
       });
       await fetchDocuments();
@@ -279,9 +289,10 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
   };
 
   const handleDeleteDocument = async (docId: string) => {
+    if (!canEditWorkspace || !userId) return;
     try {
       if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
-      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}/${docId}?workspace_id=${effectiveWorkspaceId}`, {
+      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}/${docId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`, {
         method: "DELETE",
       });
       await fetchDocuments();
@@ -564,6 +575,10 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
 
   const handleGenerateRoadmap = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditWorkspace) {
+      setGenerateError("You have read-only access to this workspace.");
+      return;
+    }
     const prompt = promptInput.trim();
     if (!prompt) {
       setGenerateError(
@@ -671,7 +686,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
   };
 
   const handleStartEditingRoadmap = () => {
-    if (!roadmapPreview) return;
+    if (!roadmapPreview || !canEditWorkspace) return;
     setEditContent(roadmapPreview.content);
     setIsEditingRoadmap(true);
     setSaveMessage(null);
@@ -684,6 +699,10 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
 
   const handleSaveRoadmap = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditWorkspace) {
+      setSaveMessage("You have read-only access to this workspace.");
+      return;
+    }
     setSavingRoadmap(true);
     setSaveMessage(null);
     try {
@@ -786,15 +805,21 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => {
-                setProjectSaveMessage(null);
-                setIsEditingProject(true);
-              }}
-              className="mt-4 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
-            >
-              Edit project details
-            </button>
+            {canEditWorkspace ? (
+              <button
+                onClick={() => {
+                  setProjectSaveMessage(null);
+                  setIsEditingProject(true);
+                }}
+                className="mt-4 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+              >
+                Edit project details
+              </button>
+            ) : (
+              <p className="mt-4 text-xs text-slate-500">
+                You have viewer access and cannot edit project details.
+              </p>
+            )}
           </div>
         )}
 
@@ -896,19 +921,20 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                   <div className="mt-4 flex flex-wrap items-center gap-3">
                     <input
                       type="file"
+                      disabled={!canEditWorkspace}
                       onChange={(e) => setFile(e.target.files?.[0] || null)}
                       className="text-sm"
                     />
                     <button
                       onClick={handleUpload}
-                      disabled={loadingDocs}
+                      disabled={!canEditWorkspace || loadingDocs || !file}
                       className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
                     >
                       {loadingDocs ? "Uploading..." : "Upload"}
                     </button>
                     <button
                       onClick={handleEmbed}
-                      disabled={loadingDocs}
+                      disabled={!canEditWorkspace || loadingDocs}
                       className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-60"
                     >
                       Embed
@@ -933,12 +959,14 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                               Uploaded {new Date(doc.uploaded_at).toLocaleString()}
                             </p>
                           </div>
-                          <button
-                            onClick={() => handleDeleteDocument(doc.id)}
-                            className="text-sm font-semibold text-rose-500 transition hover:text-rose-600"
-                          >
-                            Delete
-                          </button>
+                          {canEditWorkspace && (
+                            <button
+                              onClick={() => handleDeleteDocument(doc.id)}
+                              className="text-sm font-semibold text-rose-500 transition hover:text-rose-600"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -1127,8 +1155,13 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-semibold text-slate-900">AI Roadmap</h2>
               <button
-                onClick={() => setShowAssistant(true)}
-                className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                onClick={() => {
+                  if (canEditWorkspace) setShowAssistant(true);
+                }}
+                disabled={!canEditWorkspace}
+                className={`rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${
+                  canEditWorkspace ? "hover:bg-blue-700" : "cursor-not-allowed opacity-60"
+                }`}
               >
                 Open assistant
               </button>
@@ -1140,12 +1173,16 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                   <span className="text-xs text-slate-500">
                     Last updated {new Date(roadmapPreview.updated_at).toLocaleString()}
                   </span>
-                  <button
-                    onClick={handleStartEditingRoadmap}
-                    className="text-sm font-semibold text-blue-600 transition hover:text-blue-700"
-                  >
-                    Update roadmap
-                  </button>
+                  {canEditWorkspace ? (
+                    <button
+                      onClick={handleStartEditingRoadmap}
+                      className="text-sm font-semibold text-blue-600 transition hover:text-blue-700"
+                    >
+                      Update roadmap
+                    </button>
+                  ) : (
+                    <span className="text-xs font-medium text-slate-400">Read-only view</span>
+                  )}
                 </div>
               )}
 
@@ -1224,6 +1261,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
               <PRDList
                 projectId={projectId}
                 workspaceId={effectiveWorkspaceId}
+                workspaceRole={workspaceRole}
                 onSelectPrd={(projId, id) =>
                   setSelectedPrd({ projectId: projId, prdId: id })
                 }
@@ -1237,6 +1275,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                 projectId={selectedPrd.projectId}
                 prdId={selectedPrd.prdId}
                 workspaceId={effectiveWorkspaceId}
+                workspaceRole={workspaceRole}
                 onBack={() => setSelectedPrd(null)}
               />
             )}
@@ -1265,6 +1304,11 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+              {!canEditWorkspace && (
+                <p className="text-xs text-slate-500">
+                  You have viewer access. The assistant is available in read-only mode.
+                </p>
+              )}
               {conversation.length === 0 ? (
                 <p className="text-sm text-slate-500">
                   No messages yet. Provide a prompt to begin.
@@ -1309,7 +1353,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                 }
                 rows={3}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                disabled={isGenerating}
+                disabled={isGenerating || !canEditWorkspace}
               />
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>
@@ -1320,7 +1364,8 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                     <button
                       type="button"
                       onClick={handleStartNewConversation}
-                      className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
+                      disabled={!canEditWorkspace}
+                      className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300 disabled:opacity-60"
                     >
                       Reset
                     </button>
@@ -1328,7 +1373,7 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                   <button
                     type="submit"
                     className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-                    disabled={isGenerating}
+                    disabled={isGenerating || !canEditWorkspace}
                   >
                     {isGenerating ? "Thinking..." : "Send"}
                   </button>
@@ -1340,8 +1385,9 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
                     <button
                       key={chip}
                       type="button"
-                      onClick={() => setPromptInput(chip)}
-                      className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                      onClick={() => canEditWorkspace && setPromptInput(chip)}
+                      disabled={!canEditWorkspace}
+                      className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-60"
                     >
                       {chip}
                     </button>
@@ -1368,6 +1414,10 @@ export default function ProjectDetail({ projectId, workspaceId, onProjectUpdated
               className="mt-6 space-y-4"
               onSubmit={async (event) => {
                 event.preventDefault();
+                if (!canEditWorkspace) {
+                  setProjectSaveMessage("You have read-only access to this workspace.");
+                  return;
+                }
                 if (!effectiveWorkspaceId) {
                   setProjectSaveMessage("Workspace context missing");
                   return;

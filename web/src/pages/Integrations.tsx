@@ -419,6 +419,7 @@ export default function IntegrationsPage() {
                   workspaceKnowledgeEntries
                 );
                 const topics = (repo.metadata?.topics as string[] | undefined) ?? [];
+                const repoDescription = asString(repo.metadata?.description);
                 return (
                   <li key={repo.id} className="rounded-2xl border border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -435,7 +436,7 @@ export default function IntegrationsPage() {
                           </button>
                         </div>
                         <div className="mt-3 space-y-3 text-sm text-slate-600">
-                          {repo.metadata?.description && <p>{repo.metadata.description as string}</p>}
+                          {repoDescription && <p>{repoDescription}</p>}
                           {topics.length > 0 && (
                             <p className="text-xs uppercase tracking-wide text-slate-400">
                               Topics: {topics.join(", ")}
@@ -496,14 +497,13 @@ export default function IntegrationsPage() {
                 <ul className="mt-4 space-y-3 text-sm text-slate-600">
                   {availableRepos.map((repo) => {
                     const fullName = (repo.full_name as string) ?? "";
+                    const description = asString(repo.description);
                     return (
                       <li key={fullName} className="rounded-2xl border border-slate-200 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <p className="text-base font-semibold text-slate-900">{fullName}</p>
-                            {repo.description && (
-                              <p className="text-xs text-slate-500">{repo.description as string}</p>
-                            )}
+                            {description && <p className="text-xs text-slate-500">{description}</p>}
                           </div>
                           <button
                             onClick={() => handleSyncRepo(fullName)}
@@ -582,7 +582,7 @@ export default function IntegrationsPage() {
                                           ))}
                                         </ul>
                                       </div>
-                                    ),
+                                    )
                                 )}
                               </div>
                             );
@@ -600,13 +600,14 @@ export default function IntegrationsPage() {
                           {["phase_1", "phase_2", "phase_3"].map((key) => {
                             const phase = roadmap[key] as Record<string, unknown> | undefined;
                             if (!phase) return null;
-                            const initiatives = (phase.key_initiatives as string[] | undefined) ?? [];
+                            const initiatives = asStringArray(phase.key_initiatives);
+                            const phaseName =
+                              asString(phase.name) ?? key.replace("_", " ").toUpperCase();
+                            const phaseGoal = asString(phase.goal);
                             return (
                               <div key={`${repo.id}-${key}`} className="rounded-xl bg-slate-100 p-3">
-                                <p className="text-sm font-semibold text-slate-800">
-                                  {phase.name ?? key.replace("_", " ").toUpperCase()}
-                                </p>
-                                {phase.goal && <p className="text-xs text-slate-500">Goal: {phase.goal as string}</p>}
+                                <p className="text-sm font-semibold text-slate-800">{phaseName}</p>
+                                {phaseGoal && <p className="text-xs text-slate-500">Goal: {phaseGoal}</p>}
                                 {initiatives.length > 0 && (
                                   <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-600">
                                     {initiatives.map((item, index) => (
@@ -627,15 +628,22 @@ export default function IntegrationsPage() {
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">PRD Drafts</p>
                       {prds.length > 0 ? (
                         <div className="mt-3 space-y-3 text-sm text-slate-600">
-                          {prds.slice(0, 3).map((prd, index) => (
-                            <div key={`${repo.id}-prd-${index}`} className="rounded-xl bg-slate-100 p-3">
-                              <p className="text-sm font-semibold text-slate-800">{(prd.name as string) ?? `Draft ${index + 1}`}</p>
-                              {prd.problem && <p className="text-xs text-slate-500">Problem: {prd.problem as string}</p>}
-                              {prd.solution_outline && (
-                                <p className="text-xs text-slate-500">Solution: {prd.solution_outline as string}</p>
-                              )}
-                            </div>
-                          ))}
+                          {prds.slice(0, 3).map((prd, index) => {
+                            const draftName = asString(prd.name) ?? `Draft ${index + 1}`;
+                            const draftProblem = asString(prd.problem);
+                            const draftSolution = asString(prd.solution_outline);
+                            return (
+                              <div key={`${repo.id}-prd-${index}`} className="rounded-xl bg-slate-100 p-3">
+                                <p className="text-sm font-semibold text-slate-800">{draftName}</p>
+                                {draftProblem && (
+                                  <p className="text-xs text-slate-500">Problem: {draftProblem}</p>
+                                )}
+                                {draftSolution && (
+                                  <p className="text-xs text-slate-500">Solution: {draftSolution}</p>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="mt-3 text-sm text-slate-500">AI PRD drafts will appear after the next sync.</p>

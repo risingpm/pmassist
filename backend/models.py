@@ -35,6 +35,9 @@ class User(Base):
     reset_tokens = relationship(
         "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
     )
+    workspace_memberships = relationship(
+        "WorkspaceMember", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Workspace(Base):
@@ -56,10 +59,28 @@ class WorkspaceMember(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    role = Column(String, nullable=False, default="owner")
+    role = Column(String, nullable=False, default="admin")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     workspace = relationship("Workspace", back_populates="members")
+    user = relationship("User", back_populates="workspace_memberships")
+
+
+class WorkspaceInvitation(Base):
+    __tablename__ = "workspace_invitations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    email = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="viewer")
+    token = Column(String, unique=True, nullable=False)
+    invited_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+
+    workspace = relationship("Workspace")
 
 
 # ✅ Project Model

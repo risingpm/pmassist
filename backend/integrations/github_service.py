@@ -65,10 +65,6 @@ openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
 openai_org = os.getenv("OPENAI_ORG")
 if openai_org:
     openai_kwargs["organization"] = openai_org
-openai_project = os.getenv("OPENAI_PROJECT")
-if openai_project:
-    openai_kwargs["project"] = openai_project
-
 openai_client = OpenAI(**openai_kwargs)
 
 PRODUCT_USE_CASE_CATEGORIES = [

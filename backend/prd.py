@@ -5,6 +5,7 @@ import json
 from .database import get_db
 from . import models, schemas
 from .workspaces import get_project_in_workspace
+from backend.rbac import ensure_membership
 
 from openai import OpenAI
 import os
@@ -20,10 +21,6 @@ openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
 openai_org = os.getenv("OPENAI_ORG")
 if openai_org:
     openai_kwargs["organization"] = openai_org
-openai_project = os.getenv("OPENAI_PROJECT")
-if openai_project:
-    openai_kwargs["project"] = openai_project
-
 # 🔑 OpenAI client
 client = OpenAI(**openai_kwargs)
 
@@ -36,7 +33,14 @@ router = APIRouter(
 # Generate a new PRD (Markdown only)
 # -----------------------------
 @router.post("/{project_id}/prd", response_model=schemas.PRDResponse)
-def generate_prd(project_id: str, prd_data: schemas.PRDCreate, workspace_id: UUID, db: Session = Depends(get_db)):
+def generate_prd(
+    project_id: str,
+    prd_data: schemas.PRDCreate,
+    workspace_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
     project = get_project_in_workspace(db, project_id, workspace_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -123,7 +127,15 @@ User instructions: {prd_data.prompt}
 # ✅ Refine an existing PRD
 # ---------------------------------------------------------
 @router.put("/{project_id}/prds/{prd_id}/refine", response_model=schemas.PRDResponse)
-def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, workspace_id: UUID, db: Session = Depends(get_db)):
+def refine_prd(
+    project_id: str,
+    prd_id: UUID,
+    refine_data: schemas.PRDRefine,
+    workspace_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
     # Fetch the current PRD
     project = get_project_in_workspace(db, project_id, workspace_id)
 
@@ -213,7 +225,8 @@ def refine_prd(project_id: str, prd_id: UUID, refine_data: schemas.PRDRefine, wo
 # List all PRDs for a project
 # -----------------------------
 @router.get("/{project_id}/prds", response_model=list[schemas.PRDResponse])
-def list_prds(project_id: str, workspace_id: UUID, db: Session = Depends(get_db)):
+def list_prds(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
     project = get_project_in_workspace(db, project_id, workspace_id)
     return (
         db.query(models.PRD)
@@ -226,7 +239,8 @@ def list_prds(project_id: str, workspace_id: UUID, db: Session = Depends(get_db)
 # Get a specific PRD by ID
 # -----------------------------
 @router.get("/{project_id}/prds/{prd_id}", response_model=schemas.PRDResponse)
-def get_prd(project_id: str, prd_id: UUID, workspace_id: UUID, db: Session = Depends(get_db)):
+def get_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
     project = get_project_in_workspace(db, project_id, workspace_id)
     prd = (
         db.query(models.PRD)
@@ -242,7 +256,8 @@ def get_prd(project_id: str, prd_id: UUID, workspace_id: UUID, db: Session = Dep
 # Delete a PRD
 # -----------------------------
 @router.delete("/{project_id}/prds/{prd_id}", status_code=204)
-def delete_prd(project_id: str, prd_id: UUID, workspace_id: UUID, db: Session = Depends(get_db)):
+def delete_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
     project = get_project_in_workspace(db, project_id, workspace_id)
     prd = (
         db.query(models.PRD)
@@ -281,10 +296,15 @@ def delete_prd(project_id: str, prd_id: UUID, workspace_id: UUID, db: Session = 
 # Get the active PRD
 # -----------------------------
 @router.get("/{project_id}/prd/active", response_model=schemas.PRDResponse)
-def get_active_prd(project_id: str, db: Session = Depends(get_db)):
+def get_active_prd(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
     prd = (
         db.query(models.PRD)
-        .filter(models.PRD.project_id == project_id, models.PRD.is_active == True)
+        .filter(
+            models.PRD.project_id == project_id,
+            models.PRD.workspace_id == workspace_id,
+            models.PRD.is_active == True,
+        )
         .order_by(models.PRD.version.desc())
         .first()
     )
@@ -297,8 +317,17 @@ def get_active_prd(project_id: str, db: Session = Depends(get_db)):
 # Export PRD to .docx
 # -----------------------------
 @router.get("/{project_id}/prds/{prd_id}/export")
-def export_prd(project_id: str, prd_id: UUID, db: Session = Depends(get_db)):
-    prd = db.query(models.PRD).filter(models.PRD.id == prd_id, models.PRD.project_id == project_id).first()
+def export_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    prd = (
+        db.query(models.PRD)
+        .filter(
+            models.PRD.id == prd_id,
+            models.PRD.project_id == project_id,
+            models.PRD.workspace_id == workspace_id,
+        )
+        .first()
+    )
     if not prd:
         raise HTTPException(status_code=404, detail="PRD not found")
 

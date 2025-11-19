@@ -7,6 +7,7 @@ from backend.workspaces import get_project_in_workspace
 from backend.knowledge.file_utils import extract_text_from_file
 from backend.knowledge.chunking import chunk_text
 from backend.knowledge.embeddings import generate_embedding
+from backend.rbac import ensure_membership
 import uuid
 from datetime import datetime
 
@@ -20,9 +21,11 @@ router = APIRouter(
 async def upload_document(
     project_id: str,
     workspace_id: UUID,
+    user_id: UUID,
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
     project = get_project_in_workspace(db, project_id, workspace_id)
 
     try:
@@ -60,7 +63,8 @@ async def upload_document(
 
 # 📌 List all documents for a project
 @router.get("/{project_id}")
-def list_documents(project_id: str, workspace_id: UUID, db: Session = Depends(get_db)):
+def list_documents(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
     project = get_project_in_workspace(db, project_id, workspace_id)
     docs = (
         db.query(Document)
@@ -85,7 +89,8 @@ def list_documents(project_id: str, workspace_id: UUID, db: Session = Depends(ge
 
 # 📌 Fetch full content of a single chunk
 @router.get("/{project_id}/{doc_id}")
-def get_document(project_id: str, doc_id: str, workspace_id: UUID, db: Session = Depends(get_db)):
+def get_document(project_id: str, doc_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
     project = get_project_in_workspace(db, project_id, workspace_id)
     doc = (
         db.query(Document)
@@ -113,7 +118,8 @@ def get_document(project_id: str, doc_id: str, workspace_id: UUID, db: Session =
 
 # 📌 Delete a document chunk
 @router.delete("/{project_id}/{doc_id}")
-def delete_document(project_id: str, doc_id: str, workspace_id: UUID, db: Session = Depends(get_db)):
+def delete_document(project_id: str, doc_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
     project = get_project_in_workspace(db, project_id, workspace_id)
     doc = (
         db.query(Document)
@@ -134,7 +140,8 @@ def delete_document(project_id: str, doc_id: str, workspace_id: UUID, db: Sessio
 
 # 📌 Generate embeddings for all docs of a project
 @router.post("/embed/{project_id}")
-def embed_documents(project_id: str, workspace_id: UUID, db: Session = Depends(get_db)):
+def embed_documents(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
     project = get_project_in_workspace(db, project_id, workspace_id)
     docs = db.query(Document).filter(
         Document.project_id == project_id,

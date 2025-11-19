@@ -5,10 +5,6 @@ _openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
 _openai_org = os.getenv("OPENAI_ORG")
 if _openai_org:
     _openai_kwargs["organization"] = _openai_org
-_openai_project = os.getenv("OPENAI_PROJECT")
-if _openai_project:
-    _openai_kwargs["project"] = _openai_project
-
 client = OpenAI(**_openai_kwargs)
 
 def generate_embedding(text: str):
