@@ -3,6 +3,7 @@ import { USER_ID_KEY } from "./constants";
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 export type WorkspaceRole = "admin" | "editor" | "viewer";
+export type ProjectRole = "owner" | "contributor" | "viewer";
 
 const MISSING_USER_ERROR = "User session missing. Please sign in again.";
 
@@ -252,6 +253,17 @@ export type WorkspaceMember = {
   display_name: string;
   role: WorkspaceRole;
   joined_at: string;
+};
+
+export type ProjectMember = {
+  id: string | null;
+  project_id: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  role: ProjectRole;
+  inherited: boolean;
+  joined_at?: string | null;
 };
 
 export type WorkspaceInvitation = {
@@ -867,6 +879,87 @@ export async function getWorkspaceInvitations(
   const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invitations?${params}`);
   if (!res.ok) throw new Error("Failed to load invitations");
   return res.json();
+}
+
+export async function getProjectMembers(
+  projectId: string,
+  workspaceId: string,
+  userId?: string | null
+): Promise<ProjectMember[]> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/projects/${projectId}/members?${params}`);
+  if (!res.ok) throw new Error("Failed to load project members");
+  return res.json();
+}
+
+export async function addProjectMember(
+  projectId: string,
+  workspaceId: string,
+  payload: { user_id: string; role: ProjectRole },
+  userId?: string | null
+) {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/projects/${projectId}/members?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to invite project member");
+  }
+  return res.json() as Promise<ProjectMember>;
+}
+
+export async function updateProjectMemberRole(
+  projectId: string,
+  memberId: string,
+  workspaceId: string,
+  role: ProjectRole,
+  userId?: string | null
+) {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/projects/${projectId}/members/${memberId}?${params}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to update project member");
+  }
+  return res.json() as Promise<ProjectMember>;
+}
+
+export async function removeProjectMember(
+  projectId: string,
+  memberId: string,
+  workspaceId: string,
+  userId?: string | null
+) {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/projects/${projectId}/members/${memberId}?${params}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to remove project member");
+  }
+}
+
+export async function getProjectRole(
+  projectId: string,
+  workspaceId: string,
+  userId?: string | null
+): Promise<ProjectRole> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/projects/${projectId}/membership?${params}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load project role");
+  }
+  const body = await res.json();
+  return (body.role || "viewer") as ProjectRole;
 }
 
 export async function inviteWorkspaceMember(

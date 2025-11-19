@@ -11,7 +11,8 @@ from .database import Base, engine, SessionLocal
 from .models import Project
 from . import prd, agent, auth, models
 from .workspaces import workspaces_router, user_workspaces_router
-from backend.rbac import ensure_membership
+from backend import project_members
+from backend.rbac import ensure_membership, ensure_project_access
 
 # Create tables if they don’t already exist
 Base.metadata.create_all(bind=engine)
@@ -85,6 +86,17 @@ def create_project(project: ProjectCreate, user_id: UUID, db: Session = Depends(
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
+    existing_project_membership = (
+        db.query(models.ProjectMember)
+        .filter(
+            models.ProjectMember.project_id == db_project.id,
+            models.ProjectMember.user_id == user_id,
+        )
+        .first()
+    )
+    if not existing_project_membership:
+        db.add(models.ProjectMember(project_id=db_project.id, user_id=user_id, role="owner"))
+        db.commit()
     return {"id": db_project.id, "project": {
         "title": db_project.title,
         "description": db_project.description,
@@ -117,7 +129,7 @@ def list_projects(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_d
 # Get a single project
 @app.get("/projects/{project_id}")
 def get_project(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
-    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="viewer")
     query = db.query(Project).filter(Project.id == project_id, Project.workspace_id == workspace_id)
     project = query.first()
     if not project:
@@ -141,7 +153,7 @@ def update_project(
     user_id: UUID,
     db: Session = Depends(get_db),
 ):
-    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="contributor")
     query = db.query(Project).filter(Project.id == project_id, Project.workspace_id == workspace_id)
     db_project = query.first()
     if not db_project:
@@ -169,7 +181,7 @@ def update_project(
 # Delete project
 @app.delete("/projects/{project_id}")
 def delete_project(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
-    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="owner")
     query = db.query(Project).filter(Project.id == project_id, Project.workspace_id == workspace_id)
     db_project = query.first()
     if not db_project:
@@ -193,6 +205,7 @@ app.include_router(links.router)
 app.include_router(prototype_agent.router)
 app.include_router(prd.router)
 app.include_router(agent.router)
+app.include_router(project_members.router)
 app.include_router(workspaces_router)
 app.include_router(user_workspaces_router)
 app.include_router(auth.router)

@@ -20,7 +20,7 @@ from backend.database import get_db
 from backend.models import Project, Document, PRD, Roadmap, RoadmapConversation, UserAgent
 from backend.workspaces import get_project_in_workspace
 from backend import schemas
-from backend.rbac import ensure_membership
+from backend.rbac import ensure_project_access
 
 _openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
 _openai_org = os.getenv("OPENAI_ORG")
@@ -174,7 +174,7 @@ def generate_roadmap_endpoint(
     if not payload.user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
 
-    ensure_membership(db, payload.workspace_id, payload.user_id, required_role="editor")
+    ensure_project_access(db, payload.workspace_id, UUID(project_id), payload.user_id, required_role="contributor")
 
     project = get_project_in_workspace(db, project_id, payload.workspace_id)
 
@@ -314,7 +314,7 @@ def get_saved_roadmap(
     user_id: UUID,
     db: Session = Depends(get_db),
 ):
-    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="viewer")
     roadmap = (
         db.query(Roadmap)
         .filter(
@@ -341,7 +341,7 @@ def update_roadmap(
     user_id: UUID,
     db: Session = Depends(get_db),
 ):
-    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="contributor")
     project = get_project_in_workspace(db, project_id, workspace_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")

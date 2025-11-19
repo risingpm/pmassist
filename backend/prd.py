@@ -5,7 +5,7 @@ import json
 from .database import get_db
 from . import models, schemas
 from .workspaces import get_project_in_workspace
-from backend.rbac import ensure_membership
+from backend.rbac import ensure_project_access
 
 from openai import OpenAI
 import os
@@ -40,7 +40,7 @@ def generate_prd(
     user_id: UUID,
     db: Session = Depends(get_db),
 ):
-    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="contributor")
     project = get_project_in_workspace(db, project_id, workspace_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -135,7 +135,7 @@ def refine_prd(
     user_id: UUID,
     db: Session = Depends(get_db),
 ):
-    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="contributor")
     # Fetch the current PRD
     project = get_project_in_workspace(db, project_id, workspace_id)
 
@@ -226,7 +226,7 @@ def refine_prd(
 # -----------------------------
 @router.get("/{project_id}/prds", response_model=list[schemas.PRDResponse])
 def list_prds(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
-    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="viewer")
     project = get_project_in_workspace(db, project_id, workspace_id)
     return (
         db.query(models.PRD)
@@ -240,7 +240,7 @@ def list_prds(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = 
 # -----------------------------
 @router.get("/{project_id}/prds/{prd_id}", response_model=schemas.PRDResponse)
 def get_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
-    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="viewer")
     project = get_project_in_workspace(db, project_id, workspace_id)
     prd = (
         db.query(models.PRD)
@@ -257,7 +257,7 @@ def get_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID, db
 # -----------------------------
 @router.delete("/{project_id}/prds/{prd_id}", status_code=204)
 def delete_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
-    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="contributor")
     project = get_project_in_workspace(db, project_id, workspace_id)
     prd = (
         db.query(models.PRD)
@@ -297,7 +297,7 @@ def delete_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID,
 # -----------------------------
 @router.get("/{project_id}/prd/active", response_model=schemas.PRDResponse)
 def get_active_prd(project_id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
-    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="viewer")
     prd = (
         db.query(models.PRD)
         .filter(
@@ -318,7 +318,7 @@ def get_active_prd(project_id: str, workspace_id: UUID, user_id: UUID, db: Sessi
 # -----------------------------
 @router.get("/{project_id}/prds/{prd_id}/export")
 def export_prd(project_id: str, prd_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
-    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    ensure_project_access(db, workspace_id, UUID(project_id), user_id, required_role="viewer")
     prd = (
         db.query(models.PRD)
         .filter(

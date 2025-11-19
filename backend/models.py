@@ -38,6 +38,9 @@ class User(Base):
     workspace_memberships = relationship(
         "WorkspaceMember", back_populates="user", cascade="all, delete-orphan"
     )
+    project_memberships = relationship(
+        "ProjectMember", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Workspace(Base):
@@ -64,6 +67,19 @@ class WorkspaceMember(Base):
 
     workspace = relationship("Workspace", back_populates="members")
     user = relationship("User", back_populates="workspace_memberships")
+
+
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False, default="viewer")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    project = relationship("Project", back_populates="members")
+    user = relationship("User", back_populates="project_memberships")
 
 
 class WorkspaceInvitation(Base):
@@ -107,6 +123,7 @@ class Project(Base):
     links = relationship("ProjectLink", back_populates="project", cascade="all, delete-orphan")
     prototype_sessions = relationship("PrototypeSession", back_populates="project", cascade="all, delete-orphan")
     workspace = relationship("Workspace", back_populates="projects")
+    members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
 
 
 # ✅ Roadmap Model
