@@ -3,6 +3,8 @@ from typing import Optional, Literal, Any
 from datetime import datetime
 from uuid import UUID
 
+WorkspaceRoleLiteral = Literal["admin", "editor", "viewer"]
+
 # ---------------------------------------------------------
 # PRD Schemas
 # ---------------------------------------------------------
@@ -139,6 +141,7 @@ class AuthResponse(BaseModel):
     email: EmailStr
     workspace_id: UUID | None = None
     workspace_name: str | None = None
+    workspace_role: WorkspaceRoleLiteral | None = None
 
 
 class WorkspaceResponse(BaseModel):
@@ -147,6 +150,7 @@ class WorkspaceResponse(BaseModel):
     owner_id: UUID
     created_at: datetime
     updated_at: datetime
+    role: WorkspaceRoleLiteral | None = None
 
     class Config:
         from_attributes = True
@@ -158,6 +162,41 @@ class WorkspaceCreate(BaseModel):
 
 class WorkspaceUpdate(BaseModel):
     name: str
+
+
+class WorkspaceMemberResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    email: EmailStr
+    display_name: str
+    role: WorkspaceRoleLiteral
+    joined_at: datetime
+
+
+class WorkspaceMemberRoleUpdate(BaseModel):
+    role: WorkspaceRoleLiteral
+
+
+class WorkspaceInviteRequest(BaseModel):
+    email: EmailStr
+    role: WorkspaceRoleLiteral | None = None
+
+
+class WorkspaceInvitationResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    email: EmailStr
+    role: WorkspaceRoleLiteral
+    token: str
+    invited_by: UUID | None = None
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    cancelled_at: datetime | None = None
+
+
+class WorkspaceInvitationAcceptRequest(BaseModel):
+    user_id: UUID
 
 
 # ---------------------------------------------------------

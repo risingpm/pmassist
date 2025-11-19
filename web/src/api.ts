@@ -1,4 +1,47 @@
+import { USER_ID_KEY } from "./constants";
+
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+
+export type WorkspaceRole = "admin" | "editor" | "viewer";
+
+const MISSING_USER_ERROR = "User session missing. Please sign in again.";
+
+function resolveUserId(explicit?: string | null): string {
+  if (explicit) return explicit;
+  if (typeof window !== "undefined") {
+    const stored = window.sessionStorage.getItem(USER_ID_KEY);
+    if (stored) return stored;
+  }
+  throw new Error(MISSING_USER_ERROR);
+}
+
+function buildWorkspaceQuery(
+  workspaceId: string,
+  userId?: string | null,
+  extra?: Record<string, string | undefined>
+) {
+  const params = new URLSearchParams();
+  params.set("workspace_id", workspaceId);
+  params.set("user_id", resolveUserId(userId));
+  if (extra) {
+    Object.entries(extra).forEach(([key, value]) => {
+      if (typeof value === "string") {
+        params.set(key, value);
+      }
+    });
+  }
+  return params.toString();
+}
+
+function workspaceUrl(
+  path: string,
+  workspaceId: string,
+  userId?: string | null,
+  extra?: Record<string, string | undefined>
+) {
+  const query = buildWorkspaceQuery(workspaceId, userId, extra);
+  return `${path}?${query}`;
+}
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -33,6 +76,7 @@ export type AuthResponse = {
   email: string;
   workspace_id?: string | null;
   workspace_name?: string | null;
+  workspace_role?: WorkspaceRole | null;
 };
 
 export type ForgotPasswordResponse = {
@@ -201,6 +245,28 @@ export type GitHubWorkspaceContext = {
   knowledge_entries: KnowledgeEntryRecord[];
 };
 
+export type WorkspaceMember = {
+  id: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  role: WorkspaceRole;
+  joined_at: string;
+};
+
+export type WorkspaceInvitation = {
+  id: string;
+  workspace_id: string;
+  email: string;
+  role: WorkspaceRole;
+  token: string;
+  invited_by?: string | null;
+  created_at: string;
+  expires_at: string;
+  accepted_at?: string | null;
+  cancelled_at?: string | null;
+};
+
 export type GitHubProjectContext = {
   repo: GitHubRepoRecord | null;
   available_repos: GitHubRepoRecord[];
@@ -218,8 +284,8 @@ export async function startGitHubAuth(workspaceId: string, userId: string, redir
 }
 
 export async function fetchUserRepos(workspaceId: string, userId: string) {
-  const params = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
-  const res = await fetch(`${API_BASE}/integrations/github/repos?${params.toString()}`);
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/integrations/github/repos?${params}`);
   if (!res.ok) throw new Error("Failed to load GitHub repositories");
   return res.json() as Promise<{
     available_repos: Array<Record<string, unknown>>;
@@ -233,8 +299,8 @@ export async function syncGitHubRepo(
   userId: string,
   payload: { repo_full_name: string; branch?: string | null; force?: boolean }
 ) {
-  const params = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
-  const res = await fetch(`${API_BASE}/integrations/github/sync?${params.toString()}`, {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/integrations/github/sync?${params}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -246,15 +312,21 @@ export async function syncGitHubRepo(
   return res.json() as Promise<GitHubRepoRecord>;
 }
 
-export async function getGitHubContext(workspaceId: string) {
-  const res = await fetch(`${API_BASE}/integrations/github/context?workspace_id=${workspaceId}`);
+export async function getGitHubContext(workspaceId: string, userId?: string | null) {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/integrations/github/context`, workspaceId, userId)
+  );
   if (!res.ok) throw new Error("Failed to load GitHub context");
   return res.json() as Promise<GitHubWorkspaceContext>;
 }
 
-export async function getProjectGitHubContext(projectId: string, workspaceId: string) {
+export async function getProjectGitHubContext(projectId: string, workspaceId: string, userId?: string | null) {
   const res = await fetch(
-    `${API_BASE}/integrations/github/projects/${projectId}/context?workspace_id=${workspaceId}`
+    workspaceUrl(
+      `${API_BASE}/integrations/github/projects/${projectId}/context`,
+      workspaceId,
+      userId
+    )
   );
   if (!res.ok) throw new Error("Failed to load project GitHub context");
   return res.json() as Promise<GitHubProjectContext>;
@@ -262,7 +334,7 @@ export async function getProjectGitHubContext(projectId: string, workspaceId: st
 
 export async function linkProjectGitHubRepo(projectId: string, workspaceId: string, repoId: string) {
   const res = await fetch(
-    `${API_BASE}/integrations/github/projects/${projectId}/link?workspace_id=${workspaceId}`,
+    workspaceUrl(`${API_BASE}/integrations/github/projects/${projectId}/link`, workspaceId),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -278,7 +350,7 @@ export async function linkProjectGitHubRepo(projectId: string, workspaceId: stri
 
 export async function unlinkProjectGitHubRepo(projectId: string, workspaceId: string) {
   const res = await fetch(
-    `${API_BASE}/integrations/github/projects/${projectId}/link?workspace_id=${workspaceId}`,
+    workspaceUrl(`${API_BASE}/integrations/github/projects/${projectId}/link`, workspaceId),
     {
       method: "DELETE",
     }
@@ -292,13 +364,13 @@ export async function unlinkProjectGitHubRepo(projectId: string, workspaceId: st
 
 // ---------------- Projects ----------------
 export async function getProjects(workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch projects");
   return res.json();
 }
 
 export async function getProject(id: string, workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects/${id}?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${id}`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch project");
   return res.json();
 }
@@ -311,7 +383,7 @@ export async function createProject(data: {
   target_personas?: string[] | null;
   workspace_id: string;
 }) {
-  const res = await fetch(`${API_BASE}/projects`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects`, data.workspace_id), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -331,7 +403,7 @@ export async function updateProject(
     workspace_id: string;
   }
 ) {
-  const res = await fetch(`${API_BASE}/projects/${id}?workspace_id=${data.workspace_id}`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${id}`, data.workspace_id), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -341,7 +413,7 @@ export async function updateProject(
 }
 
 export async function deleteProject(id: string, workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects/${id}?workspace_id=${workspaceId}`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${id}`, workspaceId), {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete project");
@@ -350,7 +422,7 @@ export async function deleteProject(id: string, workspaceId: string) {
 
 // ---------------- Roadmap ----------------
 export async function fetchRoadmap(projectId: string, workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/roadmap?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch roadmap");
   return res.json();
 }
@@ -380,7 +452,7 @@ export async function generateRoadmapChat(
 }
 
 export async function updateRoadmap(projectId: string, workspaceId: string, content: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/roadmap?workspace_id=${workspaceId}`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
@@ -394,7 +466,7 @@ export async function updateRoadmap(projectId: string, workspaceId: string, cont
 
 // ---------------- PRDs ----------------
 export async function createPrd(projectId: string, workspaceId: string, body: { feature_name: string; prompt: string }) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prd?workspace_id=${workspaceId}`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prd`, workspaceId), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -404,20 +476,22 @@ export async function createPrd(projectId: string, workspaceId: string, body: { 
 }
 
 export async function getPrds(projectId: string, workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prds?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch PRDs");
   return res.json();
 }
 
 export async function getPrd(projectId: string, prdId: string, workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch PRD");
   return res.json();
 }
 
 export async function refinePrd(projectId: string, prdId: string, workspaceId: string, instructions: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}/refine?workspace_id=${workspaceId}`, {
-    method: "PUT",
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/refine`, workspaceId),
+    {
+      method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instructions })
   });
@@ -427,14 +501,16 @@ export async function refinePrd(projectId: string, prdId: string, workspaceId: s
 }
 
 export async function deletePrd(projectId: string, prdId: string, workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}?workspace_id=${workspaceId}`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}`, workspaceId), {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete PRD");
 }
 
 export async function exportPrd(projectId: string, prdId: string, workspaceId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prds/${prdId}/export?workspace_id=${workspaceId}`);
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/export`, workspaceId)
+  );
   if (!res.ok) throw new Error("Failed to export PRD");
 
   const blob = await res.blob();
@@ -447,7 +523,7 @@ export async function exportPrd(projectId: string, prdId: string, workspaceId: s
 
 // ---------------- Project Comments ----------------
 export async function getProjectComments(projectId: string, workspaceId: string): Promise<ProjectComment[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/comments?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/comments`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch project comments");
   return res.json();
 }
@@ -457,7 +533,7 @@ export async function createProjectComment(
   workspaceId: string,
   payload: ProjectCommentPayload
 ): Promise<ProjectComment> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/comments?workspace_id=${workspaceId}`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/comments`, workspaceId), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -473,7 +549,7 @@ export async function updateProjectComment(
   payload: Partial<ProjectCommentPayload>
 ): Promise<ProjectComment> {
   const res = await fetch(
-    `${API_BASE}/projects/${projectId}/comments/${commentId}?workspace_id=${workspaceId}`,
+    workspaceUrl(`${API_BASE}/projects/${projectId}/comments/${commentId}`, workspaceId),
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -486,7 +562,7 @@ export async function updateProjectComment(
 
 export async function deleteProjectComment(projectId: string, workspaceId: string, commentId: string) {
   const res = await fetch(
-    `${API_BASE}/projects/${projectId}/comments/${commentId}?workspace_id=${workspaceId}`,
+    workspaceUrl(`${API_BASE}/projects/${projectId}/comments/${commentId}`, workspaceId),
     {
       method: "DELETE",
     }
@@ -497,7 +573,7 @@ export async function deleteProjectComment(projectId: string, workspaceId: strin
 
 // ---------------- Prototypes ----------------
 export async function getPrototypes(projectId: string, workspaceId: string): Promise<Prototype[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prototypes?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prototypes`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch prototypes");
   return res.json();
 }
@@ -507,7 +583,7 @@ export async function generatePrototype(
   workspaceId: string,
   payload: { phase?: string; focus?: string; count?: number }
 ): Promise<Prototype> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prototypes`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prototypes`, workspaceId), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -529,16 +605,19 @@ export async function generatePrototypeBatch(
   workspaceId: string,
   payload: { phase?: string; focus?: string; count: number }
 ): Promise<Prototype[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prototypes/batch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      workspace_id: workspaceId,
-      phase: payload.phase ?? null,
-      focus: payload.focus ?? null,
-      count: payload.count,
-    }),
-  });
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prototypes/batch`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        phase: payload.phase ?? null,
+        focus: payload.focus ?? null,
+        count: payload.count,
+      }),
+    }
+  );
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to generate prototype batch");
@@ -548,7 +627,7 @@ export async function generatePrototypeBatch(
 
 export async function deletePrototype(projectId: string, workspaceId: string, prototypeId: string) {
   const res = await fetch(
-    `${API_BASE}/projects/${projectId}/prototypes/${prototypeId}?workspace_id=${workspaceId}`,
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prototypes/${prototypeId}`, workspaceId),
     {
       method: "DELETE",
     }
@@ -565,10 +644,13 @@ export async function deleteAllPrototypes(
   workspaceId: string,
   includeSessions = true
 ): Promise<{ deleted_prototypes: number; deleted_sessions: number }> {
-  const url = new URL(`${API_BASE}/projects/${projectId}/prototypes`);
-  url.searchParams.set("workspace_id", workspaceId);
-  url.searchParams.set("include_sessions", includeSessions ? "true" : "false");
-  const res = await fetch(url.toString(), { method: "DELETE" });
+  const url = workspaceUrl(
+    `${API_BASE}/projects/${projectId}/prototypes`,
+    workspaceId,
+    undefined,
+    { include_sessions: includeSessions ? "true" : "false" }
+  );
+  const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to delete prototypes");
@@ -578,7 +660,7 @@ export async function deleteAllPrototypes(
 
 // ---------------- Project Links ----------------
 export async function getProjectLinks(projectId: string, workspaceId: string): Promise<ProjectLink[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/links?workspace_id=${workspaceId}`);
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/links`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch project links");
   return res.json();
 }
@@ -587,7 +669,7 @@ export async function createProjectLink(
   projectId: string,
   payload: { label: string; url: string; description?: string; tags?: string[]; workspace_id: string }
 ): Promise<ProjectLink> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/links`, {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/links`, payload.workspace_id), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -601,7 +683,7 @@ export async function createProjectLink(
 
 export async function deleteProjectLink(projectId: string, workspaceId: string, linkId: string) {
   const res = await fetch(
-    `${API_BASE}/projects/${projectId}/links/${linkId}?workspace_id=${workspaceId}`,
+    workspaceUrl(`${API_BASE}/projects/${projectId}/links/${linkId}`, workspaceId),
     {
       method: "DELETE",
     }
@@ -615,7 +697,9 @@ export async function deleteProjectLink(projectId: string, workspaceId: string, 
 
 // ---------------- Prototype Agent Sessions ----------------
 export async function getPrototypeSessions(projectId: string, workspaceId: string): Promise<PrototypeSession[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/prototype-sessions?workspace_id=${workspaceId}`);
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prototype-sessions`, workspaceId)
+  );
   if (!res.ok) throw new Error("Failed to fetch prototype sessions");
   return res.json();
 }
@@ -731,6 +815,7 @@ export type WorkspaceSummary = {
   owner_id: string;
   created_at: string;
   updated_at: string;
+  role?: WorkspaceRole | null;
 };
 
 export async function getUserWorkspaces(userId: string): Promise<WorkspaceSummary[]> {
@@ -753,7 +838,9 @@ export async function createWorkspace(payload: { name: string; owner_id: string 
 }
 
 export async function updateWorkspace(workspaceId: string, name: string) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}`, {
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId());
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}?${params.toString()}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
@@ -761,6 +848,88 @@ export async function updateWorkspace(workspaceId: string, name: string) {
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to rename workspace");
+  }
+  return res.json();
+}
+
+export async function getWorkspaceMembers(workspaceId: string, userId?: string | null): Promise<WorkspaceMember[]> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members?${params}`);
+  if (!res.ok) throw new Error("Failed to load workspace members");
+  return res.json();
+}
+
+export async function getWorkspaceInvitations(
+  workspaceId: string,
+  userId?: string | null
+): Promise<WorkspaceInvitation[]> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invitations?${params}`);
+  if (!res.ok) throw new Error("Failed to load invitations");
+  return res.json();
+}
+
+export async function inviteWorkspaceMember(
+  workspaceId: string,
+  payload: { email: string; role?: WorkspaceRole },
+  userId?: string | null
+): Promise<WorkspaceInvitation> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invite?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: payload.email, role: payload.role ?? "viewer" }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to send invitation");
+  }
+  return res.json();
+}
+
+export async function updateWorkspaceMemberRole(
+  workspaceId: string,
+  memberId: string,
+  role: WorkspaceRole,
+  userId?: string | null
+): Promise<WorkspaceMember> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members/${memberId}?${params}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to update member role");
+  }
+  return res.json();
+}
+
+export async function removeWorkspaceMember(
+  workspaceId: string,
+  memberId: string,
+  userId?: string | null
+) {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members/${memberId}?${params}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to remove member");
+  }
+}
+
+export async function acceptWorkspaceInvitation(token: string, userId: string) {
+  const res = await fetch(`${API_BASE}/workspaces/invitations/${token}/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to accept invitation");
   }
   return res.json();
 }

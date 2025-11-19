@@ -2,6 +2,7 @@ import os
 from textwrap import dedent
 import json
 import uuid
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from openai import (
@@ -19,15 +20,12 @@ from backend.database import get_db
 from backend.models import Project, Document, PRD, Roadmap, RoadmapConversation, UserAgent
 from backend.workspaces import get_project_in_workspace
 from backend import schemas
+from backend.rbac import ensure_membership
 
 _openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
 _openai_org = os.getenv("OPENAI_ORG")
 if _openai_org:
     _openai_kwargs["organization"] = _openai_org
-_openai_project = os.getenv("OPENAI_PROJECT")
-if _openai_project:
-    _openai_kwargs["project"] = _openai_project
-
 client = OpenAI(**_openai_kwargs)
 
 DEFAULT_SUGGESTIONS = {
@@ -173,6 +171,10 @@ def generate_roadmap_endpoint(
 ):
     if not payload.workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id is required")
+    if not payload.user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    ensure_membership(db, payload.workspace_id, payload.user_id, required_role="editor")
 
     project = get_project_in_workspace(db, project_id, payload.workspace_id)
 
@@ -306,10 +308,20 @@ def generate_roadmap_endpoint(
 
 
 @router.get("/{project_id}/roadmap", response_model=schemas.RoadmapContentResponse)
-def get_saved_roadmap(project_id: str, db: Session = Depends(get_db)):
+def get_saved_roadmap(
+    project_id: str,
+    workspace_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
     roadmap = (
         db.query(Roadmap)
-        .filter(Roadmap.project_id == project_id, Roadmap.is_active == True)
+        .filter(
+            Roadmap.project_id == project_id,
+            Roadmap.workspace_id == workspace_id,
+            Roadmap.is_active == True,
+        )
         .order_by(Roadmap.created_at.desc())
         .first()
     )
@@ -322,8 +334,15 @@ def get_saved_roadmap(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{project_id}/roadmap")
-def update_roadmap(project_id: str, payload: schemas.RoadmapUpdateRequest, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
+def update_roadmap(
+    project_id: str,
+    payload: schemas.RoadmapUpdateRequest,
+    workspace_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, workspace_id, user_id, required_role="editor")
+    project = get_project_in_workspace(db, project_id, workspace_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 

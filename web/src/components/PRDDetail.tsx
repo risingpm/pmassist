@@ -1,20 +1,22 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getPrd, refinePrd, exportPrd, deletePrd } from "../api";
+import { getPrd, refinePrd, exportPrd, deletePrd, type WorkspaceRole } from "../api";
 
 type PRDDetailProps = {
   projectId: string;
   prdId: string;
   workspaceId: string | null;
+  workspaceRole: WorkspaceRole;
   onBack: () => void;
 };
 
-export default function PRDDetail({ projectId, prdId, workspaceId, onBack }: PRDDetailProps) {
+export default function PRDDetail({ projectId, prdId, workspaceId, workspaceRole, onBack }: PRDDetailProps) {
   const [prd, setPrd] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [refineText, setRefineText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
 
   // Fetch PRD when component mounts
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function PRDDetail({ projectId, prdId, workspaceId, onBack }: PRD
 
   // Handle refinement
   const handleRefine = async () => {
-    if (!refineText.trim()) return;
+    if (!refineText.trim() || !canEdit) return;
     setLoading(true);
     try {
       // ✅ Pass both projectId + prdId, return Markdown string
@@ -78,6 +80,10 @@ export default function PRDDetail({ projectId, prdId, workspaceId, onBack }: PRD
   };
 
   const handleDelete = async () => {
+    if (!canEdit) {
+      setError("You have read-only access to this workspace.");
+      return;
+    }
     const confirmed = window.confirm("Delete this PRD? This action cannot be undone.");
     if (!confirmed) return;
 
@@ -135,14 +141,20 @@ export default function PRDDetail({ projectId, prdId, workspaceId, onBack }: PRD
               placeholder="Enter refinement instructions..."
               className="w-full p-2 border rounded mb-2"
               rows={4}
+              disabled={!canEdit}
             />
             <button
               onClick={handleRefine}
-              disabled={loading}
+              disabled={loading || !canEdit}
               className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
             >
               Refine PRD
             </button>
+            {!canEdit && (
+              <p className="mt-2 text-xs text-slate-500">
+                Viewer access cannot refine PRDs.
+              </p>
+            )}
           </div>
 
           {/* Export Button */}
@@ -156,7 +168,7 @@ export default function PRDDetail({ projectId, prdId, workspaceId, onBack }: PRD
             </button>
             <button
               onClick={handleDelete}
-              disabled={loading}
+              disabled={loading || !canEdit}
               className="px-4 py-2 bg-red-600 text-white rounded disabled:opacity-50"
             >
               🗑 Delete PRD

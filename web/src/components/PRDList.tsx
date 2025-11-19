@@ -1,14 +1,21 @@
 import React, { useEffect, useState } from "react";
-import { getPrds, createPrd, deletePrd } from "../api";
+import { getPrds, createPrd, deletePrd, type WorkspaceRole } from "../api";
 
 type PRDListProps = {
   projectId: string;
   workspaceId: string | null;
+  workspaceRole: WorkspaceRole;
   onSelectPrd: (projectId: string, prdId: string) => void;
   onBack: () => void;
 };
 
-export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }: PRDListProps) {
+export default function PRDList({
+  projectId,
+  workspaceId,
+  workspaceRole,
+  onSelectPrd,
+  onBack,
+}: PRDListProps) {
   const [prds, setPrds] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,6 +24,7 @@ export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }:
   // new state for form
   const [featureName, setFeatureName] = useState("");
   const [prompt, setPrompt] = useState("");
+  const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
 
   // Fetch PRDs on mount
   useEffect(() => {
@@ -40,6 +48,10 @@ export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }:
   // Handle Generate via form
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) {
+      setError("You have read-only access to this workspace.");
+      return;
+    }
     setLoading(true);
     try {
       if (!workspaceId) throw new Error("Missing workspace context");
@@ -63,6 +75,10 @@ export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }:
   };
 
   const handleDelete = async (prdId: string) => {
+    if (!canEdit) {
+      setError("You have read-only access to this workspace.");
+      return;
+    }
     const confirmed = window.confirm("Are you sure you want to delete this PRD?");
     if (!confirmed) return;
 
@@ -112,6 +128,7 @@ export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }:
             required
             className="w-full border rounded p-2"
             placeholder="Enter feature name"
+            disabled={!canEdit}
           />
         </div>
 
@@ -124,16 +141,22 @@ export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }:
             className="w-full border rounded p-2"
             rows={4}
             placeholder="Describe the feature..."
+            disabled={!canEdit}
           />
         </div>
 
         <button
           type="submit"
-          disabled={loading}
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          disabled={loading || !canEdit}
+          className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-60"
         >
           {loading ? "Generating..." : "Generate PRD"}
         </button>
+        {!canEdit && (
+          <p className="text-xs text-slate-500">
+            Viewer access cannot create or refine PRDs.
+          </p>
+        )}
       </form>
 
       {/* Loading/Error States */}
@@ -168,20 +191,22 @@ export default function PRDList({ projectId, workspaceId, onSelectPrd, onBack }:
                 <td className="p-2 border text-sm">
                   {new Date(prd.created_at).toLocaleString()}
                 </td>
-                <td className="p-2 border">
+                <td className="p-2 border space-x-2">
                   <button
-                  onClick={() => onSelectPrd(projectId, prd.id)}
+                    onClick={() => onSelectPrd(projectId, prd.id)}
                     className="px-3 py-1 bg-blue-600 text-white rounded"
                   >
                     View
                   </button>
-                  <button
-                    onClick={() => handleDelete(prd.id)}
-                    disabled={loading}
-                    className="ml-2 px-3 py-1 bg-red-600 text-white rounded disabled:opacity-50"
-                  >
-                    Delete
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => handleDelete(prd.id)}
+                      disabled={loading}
+                      className="px-3 py-1 bg-red-600 text-white rounded disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

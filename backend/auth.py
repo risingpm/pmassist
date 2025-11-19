@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from .database import get_db
 from . import models, schemas
 from .workspaces import create_workspace_with_owner, get_current_workspace
+from backend.rbac import normalize_role
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -62,6 +63,7 @@ def signup(payload: schemas.AuthCreate, db: Session = Depends(get_db)):
         email=user.email,
         workspace_id=workspace.id,
         workspace_name=workspace.name,
+        workspace_role="admin",
     )
 
 
@@ -76,11 +78,23 @@ def login(payload: schemas.AuthLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     workspace = get_current_workspace(db, user.id)
+    role = None
+    if workspace:
+        membership = (
+            db.query(models.WorkspaceMember)
+            .filter(
+                models.WorkspaceMember.workspace_id == workspace.id,
+                models.WorkspaceMember.user_id == user.id,
+            )
+            .first()
+        )
+        role = normalize_role(membership.role) if membership else None
     return schemas.AuthResponse(
         id=user.id,
         email=user.email,
         workspace_id=workspace.id if workspace else None,
         workspace_name=workspace.name if workspace else None,
+        workspace_role=role,
     )
 
 
