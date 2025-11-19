@@ -7,6 +7,7 @@ import SignInPage from "./pages/SignIn";
 import ForgotPasswordPage from "./pages/ForgotPassword";
 import ResetPasswordPage from "./pages/ResetPassword";
 import { AUTH_USER_KEY, WORKSPACE_ID_KEY } from "./constants";
+import { RoleProvider } from "./context/RoleContext";
 
 function RootRedirect() {
   const navigate = useNavigate();
@@ -39,14 +40,16 @@ function RootRedirect() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<RootRedirect />} />
-      <Route path="/onboarding" element={<OnboardingPage />} />
-      <Route path="/signin" element={<SignInPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/dashboard" element={<ProjectsPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <RoleProvider>
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/signin" element={<SignInPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/dashboard" element={<ProjectsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </RoleProvider>
   );
 }

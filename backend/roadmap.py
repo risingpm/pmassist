@@ -9,6 +9,7 @@ from uuid import UUID
 from .database import get_db
 from .models import Project, Roadmap
 from .workspaces import get_project_in_workspace
+from backend.rbac import ensure_project_access
 
 # Load environment variables
 load_dotenv()
@@ -22,8 +23,9 @@ router = APIRouter()
 
 
 @router.post("/projects/{id}/roadmap")
-def generate_roadmap(id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
-    project = get_project_in_workspace(db, id, workspace_id) if workspace_id else db.query(Project).filter(Project.id == id).first()
+def generate_roadmap(id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_project_access(db, workspace_id, UUID(id), user_id, required_role="contributor")
+    project = get_project_in_workspace(db, id, workspace_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -81,21 +83,13 @@ def generate_roadmap(id: str, workspace_id: UUID | None = None, db: Session = De
 
 
 @router.get("/projects/{id}/roadmap")
-def get_active_roadmap(id: str, workspace_id: UUID | None = None, db: Session = Depends(get_db)):
-    if workspace_id:
-        project = get_project_in_workspace(db, id, workspace_id)
-        scope = project.workspace_id
-    else:
-        project = db.query(Project).filter(Project.id == id).first()
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        scope = None
+def get_active_roadmap(id: str, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_project_access(db, workspace_id, UUID(id), user_id, required_role="viewer")
+    project = get_project_in_workspace(db, id, workspace_id)
+    scope = project.workspace_id
 
     query = db.query(Roadmap).filter(Roadmap.project_id == id, Roadmap.is_active == True)
-    if scope:
-        query = query.filter(Roadmap.workspace_id == scope)
-    else:
-        query = query.filter(Roadmap.workspace_id == None)
+    query = query.filter(Roadmap.workspace_id == scope)
 
     roadmap = query.first()
     if not roadmap:

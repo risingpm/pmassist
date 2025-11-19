@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { getPrds, createPrd, deletePrd, type WorkspaceRole } from "../api";
+import { getPrds, createPrd, deletePrd, type ProjectRole } from "../api";
 
 type PRDListProps = {
   projectId: string;
   workspaceId: string | null;
-  workspaceRole: WorkspaceRole;
+  projectRole: ProjectRole;
   onSelectPrd: (projectId: string, prdId: string) => void;
   onBack: () => void;
 };
@@ -12,7 +12,7 @@ type PRDListProps = {
 export default function PRDList({
   projectId,
   workspaceId,
-  workspaceRole,
+  projectRole,
   onSelectPrd,
   onBack,
 }: PRDListProps) {
@@ -24,7 +24,7 @@ export default function PRDList({
   // new state for form
   const [featureName, setFeatureName] = useState("");
   const [prompt, setPrompt] = useState("");
-  const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
+  const canEdit = projectRole === "owner" || projectRole === "contributor";
 
   // Fetch PRDs on mount
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function PRDList({
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit) {
-      setError("You have read-only access to this workspace.");
+      setError("You have read-only access to this project.");
       return;
     }
     setLoading(true);
@@ -76,7 +76,7 @@ export default function PRDList({
 
   const handleDelete = async (prdId: string) => {
     if (!canEdit) {
-      setError("You have read-only access to this workspace.");
+      setError("You have read-only access to this project.");
       return;
     }
     const confirmed = window.confirm("Are you sure you want to delete this PRD?");

@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 WorkspaceRoleLiteral = Literal["admin", "editor", "viewer"]
+ProjectRoleLiteral = Literal["owner", "contributor", "viewer"]
 
 # ---------------------------------------------------------
 # PRD Schemas
@@ -197,6 +198,26 @@ class WorkspaceInvitationResponse(BaseModel):
 
 class WorkspaceInvitationAcceptRequest(BaseModel):
     user_id: UUID
+
+
+class ProjectMemberResponse(BaseModel):
+    id: UUID | None = None
+    project_id: UUID
+    user_id: UUID
+    email: EmailStr
+    display_name: str
+    role: ProjectRoleLiteral
+    inherited: bool = False
+    joined_at: datetime | None = None
+
+
+class ProjectMemberCreateRequest(BaseModel):
+    user_id: UUID
+    role: ProjectRoleLiteral = "viewer"
+
+
+class ProjectMemberRoleUpdate(BaseModel):
+    role: ProjectRoleLiteral
 
 
 # ---------------------------------------------------------

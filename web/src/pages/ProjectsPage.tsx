@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import ProjectDetail from "../components/ProjectDetail";
+import WorkspaceMembersPanel from "../components/WorkspaceMembersPanel";
 import {
   createProject,
   createWorkspace,
@@ -10,7 +11,7 @@ import {
   getUserWorkspaces,
   getWorkspaceInvitations,
   getWorkspaceMembers,
-  inviteWorkspaceMember,
+  inviteWorkspaceMember as inviteWorkspaceMemberRequest,
   logout,
   removeWorkspaceMember,
   type WorkspaceInvitation,
@@ -20,19 +21,11 @@ import {
   updateWorkspace,
   updateWorkspaceMemberRole,
 } from "../api";
-import {
-  AUTH_USER_KEY,
-  USER_ID_KEY,
-  WORKSPACE_ID_KEY,
-  WORKSPACE_NAME_KEY,
-  WORKSPACE_ROLE_KEY,
-} from "../constants";
+import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
+import { useUserRole } from "../context/RoleContext";
+import { normalizeWorkspaceRole } from "../utils/roles";
 
 type PanelView = "projects" | "workspace-members";
-const WORKSPACE_ROLE_OPTIONS: WorkspaceRole[] = ["admin", "editor", "viewer"];
-
-const normalizeWorkspaceRole = (value?: string | null): WorkspaceRole =>
-  value === "admin" || value === "editor" ? value : "viewer";
 
 type Project = {
   id: string;
@@ -46,6 +39,7 @@ type Project = {
 export default function ProjectsPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { workspaceRole, setWorkspaceRole, refreshWorkspaceRole } = useUserRole();
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -59,10 +53,6 @@ export default function ProjectsPage() {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [renameLoading, setRenameLoading] = useState(false);
-  const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole>(() => {
-    if (typeof window === "undefined") return "viewer";
-    return normalizeWorkspaceRole(window.sessionStorage.getItem(WORKSPACE_ROLE_KEY));
-  });
   const [activeView, setActiveView] = useState<PanelView>("projects");
 
   const userId = typeof window !== "undefined" ? window.sessionStorage.getItem(USER_ID_KEY) : null;
@@ -72,9 +62,6 @@ export default function ProjectsPage() {
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [membersSuccess, setMembersSuccess] = useState<string | null>(null);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<WorkspaceRole>("viewer");
-  const [inviting, setInviting] = useState(false);
 
   const canEditWorkspace = workspaceRole === "admin" || workspaceRole === "editor";
   const canAdminWorkspace = workspaceRole === "admin";
@@ -83,15 +70,6 @@ export default function ProjectsPage() {
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => a.title.localeCompare(b.title)),
     [projects]
-  );
-  const sortedMembers = useMemo(
-    () =>
-      [...members].sort((a, b) => {
-        const nameA = a.display_name || a.email;
-        const nameB = b.display_name || b.email;
-        return nameA.localeCompare(nameB);
-      }),
-    [members]
   );
 
   const applyWorkspaceContext = useCallback(
@@ -104,10 +82,9 @@ export default function ProjectsPage() {
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(WORKSPACE_ID_KEY, workspace.id);
         window.sessionStorage.setItem(WORKSPACE_NAME_KEY, workspace.name);
-        window.sessionStorage.setItem(WORKSPACE_ROLE_KEY, role);
       }
     },
-    []
+    [setWorkspaceRole]
   );
 
   const refreshMembers = useCallback(async () => {
@@ -260,49 +237,52 @@ export default function ProjectsPage() {
     }
   };
 
-  const handleInviteMember = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!workspaceId || !userId) return;
-    setInviting(true);
-    setMembersError(null);
-    try {
-      await inviteWorkspaceMember(
+  const inviteWorkspaceCollaborator = useCallback(
+    async (email: string, role: WorkspaceRole) => {
+      if (!workspaceId || !userId) throw new Error("Missing workspace context");
+      setMembersError(null);
+      setMembersSuccess(null);
+      await inviteWorkspaceMemberRequest(
         workspaceId,
-        { email: inviteEmail.trim(), role: inviteRole },
+        { email: email.trim(), role },
         userId
       );
-      setInviteEmail("");
-      setInviteRole("viewer");
       setMembersSuccess("Invitation sent.");
-      refreshMembers();
-    } catch (err: any) {
-      setMembersError(err.message || "Failed to send invitation.");
-    } finally {
-      setInviting(false);
-    }
-  };
+      await refreshMembers();
+    },
+    [workspaceId, userId, refreshMembers]
+  );
 
-  const handleMemberRoleChange = async (memberId: string, role: WorkspaceRole) => {
-    if (!workspaceId) return;
-    try {
-      const updated = await updateWorkspaceMemberRole(workspaceId, memberId, role, userId ?? undefined);
-      setMembers((prev) => prev.map((member) => (member.id === memberId ? updated : member)));
-      setMembersSuccess("Member role updated.");
-    } catch (err: any) {
-      setMembersError(err.message || "Failed to update member role.");
-    }
-  };
+  const handleMemberRoleChange = useCallback(
+    async (memberId: string, role: WorkspaceRole) => {
+      if (!workspaceId) return;
+      try {
+        const updated = await updateWorkspaceMemberRole(workspaceId, memberId, role, userId ?? undefined);
+        setMembers((prev) => prev.map((member) => (member.id === memberId ? updated : member)));
+        setMembersSuccess("Member role updated.");
+        if (updated.user_id === userId && workspaceId && userId) {
+          await refreshWorkspaceRole(workspaceId, userId);
+        }
+      } catch (err: any) {
+        setMembersError(err.message || "Failed to update member role.");
+      }
+    },
+    [workspaceId, userId, refreshWorkspaceRole]
+  );
 
-  const handleRemoveMember = async (memberId: string) => {
-    if (!workspaceId || !userId) return;
-    try {
-      await removeWorkspaceMember(workspaceId, memberId, userId);
-      setMembers((prev) => prev.filter((member) => member.id !== memberId));
-      setMembersSuccess("Member removed.");
-    } catch (err: any) {
-      setMembersError(err.message || "Failed to remove member.");
-    }
-  };
+  const handleRemoveMember = useCallback(
+    async (memberId: string) => {
+      if (!workspaceId || !userId) return;
+      try {
+        await removeWorkspaceMember(workspaceId, memberId, userId);
+        setMembers((prev) => prev.filter((member) => member.id !== memberId));
+        setMembersSuccess("Member removed.");
+      } catch (err: any) {
+        setMembersError(err.message || "Failed to remove member.");
+      }
+    },
+    [workspaceId, userId]
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -316,7 +296,6 @@ export default function ProjectsPage() {
     const fromQuery = params.get("workspace");
     const storedWorkspace = window.sessionStorage.getItem(WORKSPACE_ID_KEY);
     const storedName = window.sessionStorage.getItem(WORKSPACE_NAME_KEY);
-    const storedRole = window.sessionStorage.getItem(WORKSPACE_ROLE_KEY);
 
     const effectiveWorkspace = fromQuery || storedWorkspace;
     if (effectiveWorkspace) {
@@ -327,11 +306,8 @@ export default function ProjectsPage() {
       if (storedName) {
         setWorkspaceName(storedName);
       }
-      if (storedRole) {
-        setWorkspaceRole(normalizeWorkspaceRole(storedRole));
-      }
     }
-  }, [navigate, location.search]);
+  }, [navigate, location.search, setWorkspaceRole]);
 
   useEffect(() => {
     const loadWorkspaces = async () => {
@@ -352,7 +328,6 @@ export default function ProjectsPage() {
             window.sessionStorage.setItem(WORKSPACE_NAME_KEY, current.name);
             const role = normalizeWorkspaceRole(current.role);
             setWorkspaceRole(role);
-            window.sessionStorage.setItem(WORKSPACE_ROLE_KEY, role);
           }
         }
         if (list.length === 0) {
@@ -360,7 +335,6 @@ export default function ProjectsPage() {
           if (typeof window !== "undefined") {
             window.sessionStorage.removeItem(WORKSPACE_ID_KEY);
             window.sessionStorage.removeItem(WORKSPACE_NAME_KEY);
-            window.sessionStorage.removeItem(WORKSPACE_ROLE_KEY);
           }
           setWorkspaceRole("viewer");
         }
@@ -373,7 +347,7 @@ export default function ProjectsPage() {
     };
 
     loadWorkspaces();
-  }, [userId, workspaceId, navigate, applyWorkspaceContext]);
+  }, [userId, workspaceId, navigate, applyWorkspaceContext, setWorkspaceRole]);
 
   useEffect(() => {
     const maybeLoadWorkspaceName = async () => {
@@ -388,7 +362,6 @@ export default function ProjectsPage() {
             window.sessionStorage.setItem(WORKSPACE_NAME_KEY, match.name);
             const role = normalizeWorkspaceRole(match.role);
             setWorkspaceRole(role);
-            window.sessionStorage.setItem(WORKSPACE_ROLE_KEY, role);
           }
         } catch (err) {
           console.warn("Failed to load workspace name", err);
@@ -399,7 +372,7 @@ export default function ProjectsPage() {
     if (typeof window !== "undefined") {
       maybeLoadWorkspaceName();
     }
-  }, [workspaceId, workspaceName]);
+  }, [workspaceId, workspaceName, setWorkspaceRole]);
 
   const isProjectsView = activeView === "projects";
 
@@ -425,8 +398,8 @@ export default function ProjectsPage() {
     }
 
     if (typeof window !== "undefined") {
-      [AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, WORKSPACE_ROLE_KEY].forEach(
-        (key) => window.sessionStorage.removeItem(key)
+      [AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY].forEach((key) =>
+        window.sessionStorage.removeItem(key)
       );
     }
 
@@ -447,7 +420,6 @@ export default function ProjectsPage() {
       setWorkspaces(updatedList);
       window.sessionStorage.setItem(WORKSPACE_ID_KEY, workspace.id);
       window.sessionStorage.setItem(WORKSPACE_NAME_KEY, workspace.name);
-      window.sessionStorage.setItem(WORKSPACE_ROLE_KEY, "admin");
       setWorkspaceId(workspace.id);
       setWorkspaceName(workspace.name);
       setWorkspaceRole("admin");
@@ -737,194 +709,20 @@ export default function ProjectsPage() {
               )}
             </section>
           ) : (
-            <section className="mt-8 space-y-6">
-              <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-2 pb-6 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="text-3xl font-bold">Workspace Members</h2>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Invite collaborators and manage their access inside this workspace.
-                    </p>
-                    {!canAdminWorkspace && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Only admins can change roles or invite new members.
-                      </p>
-                    )}
-                  </div>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                    {workspaceRoleLabel} access
-                  </span>
-                </div>
-
-                {(membersSuccess || membersError) && (
-                  <div className="mb-6 space-y-2">
-                    {membersSuccess && (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 shadow-sm">
-                        {membersSuccess}
-                      </div>
-                    )}
-                    {membersError && (
-                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 shadow-sm">
-                        {membersError}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {membersLoading ? (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    Loading members...
-                  </div>
-                ) : sortedMembers.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    No members found.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                          <th className="pb-3 pr-3">Member</th>
-                          <th className="pb-3 pr-3">Role</th>
-                          <th className="pb-3 pr-3">Joined</th>
-                          <th className="pb-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedMembers.map((member) => {
-                          const canModify = canAdminWorkspace && member.user_id !== userId;
-                          return (
-                            <tr key={member.id} className="border-t border-slate-100 text-slate-600">
-                              <td className="py-3 pr-3">
-                                <div className="font-medium text-slate-900">
-                                  {member.display_name || member.email}
-                                </div>
-                                <div className="text-xs text-slate-500">{member.email}</div>
-                              </td>
-                              <td className="py-3 pr-3">
-                                {canAdminWorkspace ? (
-                                  <select
-                                    value={member.role}
-                                    onChange={(event) =>
-                                      handleMemberRoleChange(
-                                        member.id,
-                                        event.target.value as WorkspaceRole
-                                      )
-                                    }
-                                    disabled={!canModify}
-                                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold capitalize text-slate-600 disabled:opacity-50"
-                                  >
-                                    {WORKSPACE_ROLE_OPTIONS.map((roleOption) => (
-                                      <option key={roleOption} value={roleOption}>
-                                        {roleOption.charAt(0).toUpperCase() + roleOption.slice(1)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <span className="text-xs font-semibold capitalize text-slate-500">
-                                    {member.role}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-3 pr-3 text-xs text-slate-500">
-                                {formatDate(member.joined_at)}
-                              </td>
-                              <td className="py-3 text-right text-xs">
-                                {canModify ? (
-                                  <button
-                                    onClick={() => handleRemoveMember(member.id)}
-                                    className="rounded-full bg-rose-50 px-3 py-1 font-semibold text-rose-500 transition hover:bg-rose-100"
-                                  >
-                                    Remove
-                                  </button>
-                                ) : (
-                                  <span className="text-slate-400">
-                                    {member.user_id === userId ? "You" : "View only"}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {canAdminWorkspace && (
-                <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3 className="text-xl font-semibold text-slate-900">Invite members</h3>
-                      <p className="text-sm text-slate-500">
-                        Send an email invitation and assign a role in one step.
-                      </p>
-                    </div>
-                    <span className="text-xs font-semibold text-slate-400">
-                      Default role: Viewer unless specified
-                    </span>
-                  </div>
-                  <form
-                    className="mt-6 grid gap-4 md:grid-cols-[2fr_1fr_auto]"
-                    onSubmit={handleInviteMember}
-                  >
-                    <input
-                      type="email"
-                      required
-                      value={inviteEmail}
-                      onChange={(event) => setInviteEmail(event.target.value)}
-                      placeholder="teammate@email.com"
-                      className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    />
-                    <select
-                      value={inviteRole}
-                      onChange={(event) => setInviteRole(event.target.value as WorkspaceRole)}
-                      className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold capitalize text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    >
-                      {WORKSPACE_ROLE_OPTIONS.map((roleOption) => (
-                        <option key={roleOption} value={roleOption}>
-                          {roleOption.charAt(0).toUpperCase() + roleOption.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="submit"
-                      disabled={inviting}
-                      className="rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {inviting ? "Sending..." : "Send invite"}
-                    </button>
-                  </form>
-                  {invitations.length > 0 && (
-                    <div className="mt-6">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                        Pending invitations
-                      </h4>
-                      <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-100">
-                        {invitations.map((invite) => (
-                          <li
-                            key={invite.id}
-                            className="flex flex-col gap-1 px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between"
-                          >
-                            <div>
-                              <p className="font-semibold text-slate-900">{invite.email}</p>
-                              <p className="text-xs text-slate-500">
-                                Role: {invite.role.charAt(0).toUpperCase() + invite.role.slice(1)} •{" "}
-                                Invited {formatDate(invite.created_at)}
-                              </p>
-                            </div>
-                            <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-600">
-                              Pending acceptance
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
+            <WorkspaceMembersPanel
+              workspaceName={workspaceName}
+              workspaceRole={workspaceRole}
+              currentUserId={userId}
+              members={members}
+              invitations={invitations}
+              loading={membersLoading}
+              successMessage={membersSuccess}
+              errorMessage={membersError}
+              canAdminWorkspace={canAdminWorkspace}
+              onInvite={inviteWorkspaceCollaborator}
+              onRoleChange={handleMemberRoleChange}
+              onRemoveMember={handleRemoveMember}
+            />
           )}
         </main>
       </div>

@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getPrd, refinePrd, exportPrd, deletePrd, type WorkspaceRole } from "../api";
+import { getPrd, refinePrd, exportPrd, deletePrd, type ProjectRole } from "../api";
 
 type PRDDetailProps = {
   projectId: string;
   prdId: string;
   workspaceId: string | null;
-  workspaceRole: WorkspaceRole;
+  projectRole: ProjectRole;
   onBack: () => void;
 };
 
-export default function PRDDetail({ projectId, prdId, workspaceId, workspaceRole, onBack }: PRDDetailProps) {
+export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, onBack }: PRDDetailProps) {
   const [prd, setPrd] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [refineText, setRefineText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
+  const canEdit = projectRole === "owner" || projectRole === "contributor";
 
   // Fetch PRD when component mounts
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function PRDDetail({ projectId, prdId, workspaceId, workspaceRole
 
   const handleDelete = async () => {
     if (!canEdit) {
-      setError("You have read-only access to this workspace.");
+      setError("You have read-only access to this project.");
       return;
     }
     const confirmed = window.confirm("Delete this PRD? This action cannot be undone.");

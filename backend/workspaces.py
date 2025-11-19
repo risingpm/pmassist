@@ -272,6 +272,16 @@ def remove_workspace_member(workspace_id: UUID, member_id: UUID, user_id: UUID, 
         _ensure_remaining_admins(db, workspace_id, exclude_member_id=member.id)
 
     db.delete(member)
+
+    (
+        db.query(models.ProjectMember)
+        .join(models.Project, models.ProjectMember.project_id == models.Project.id)
+        .filter(
+            models.Project.workspace_id == workspace_id,
+            models.ProjectMember.user_id == member.user_id,
+        )
+        .delete(synchronize_session=False)
+    )
     db.commit()
 
 
