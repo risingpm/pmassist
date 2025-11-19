@@ -4,7 +4,15 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from openai import OpenAI
+from openai import (
+    OpenAI,
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    RateLimitError,
+    AuthenticationError,
+    BadRequestError,
+)
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -12,7 +20,15 @@ from backend.models import Project, Document, PRD, Roadmap, RoadmapConversation,
 from backend.workspaces import get_project_in_workspace
 from backend import schemas
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
+_openai_org = os.getenv("OPENAI_ORG")
+if _openai_org:
+    _openai_kwargs["organization"] = _openai_org
+_openai_project = os.getenv("OPENAI_PROJECT")
+if _openai_project:
+    _openai_kwargs["project"] = _openai_project
+
+client = OpenAI(**_openai_kwargs)
 
 DEFAULT_SUGGESTIONS = {
     "vision": [
@@ -206,12 +222,37 @@ def generate_roadmap_endpoint(
         {"role": msg.role, "content": msg.content} for msg in effective_history
     )
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=openai_messages,
-        temperature=0.2,
-        response_format={"type": "json_object"},
-    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=openai_messages,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+    except RateLimitError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="OpenAI rate limit reached. Please wait a moment and try again.",
+        ) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenAI rejected the API key in use. Verify OPENAI_API_KEY is valid.",
+        ) from exc
+    except (APIConnectionError, APIStatusError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to reach OpenAI to generate the roadmap. Try again shortly.",
+        ) from exc
+    except (BadRequestError, APIError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"OpenAI request failed: {getattr(exc, 'message', str(exc))}",
+        ) from exc
+    except Exception as exc:  # pragma: no cover - safety net for unexpected SDK errors
+        raise HTTPException(
+            status_code=500, detail=f"Unexpected error while contacting OpenAI: {exc}"
+        ) from exc
 
     try:
         data = json.loads(response.choices[0].message.content)
@@ -286,7 +327,7 @@ def update_roadmap(project_id: str, payload: schemas.RoadmapUpdateRequest, db: S
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    roadmap = upsert_roadmap(db, project_id, payload.content)
+    roadmap = upsert_roadmap(db, project, payload.content)
     return {
         "id": str(roadmap.id),
         "updated_at": (roadmap.updated_at or roadmap.created_at).isoformat(),
