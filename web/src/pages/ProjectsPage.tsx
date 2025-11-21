@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import ProjectDetail from "../components/ProjectDetail";
 import WorkspaceMembersPanel from "../components/WorkspaceMembersPanel";
+import KnowledgeBasePanel from "../components/KnowledgeBasePanel";
 import {
   createProject,
   createWorkspace,
@@ -25,7 +26,7 @@ import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from
 import { useUserRole } from "../context/RoleContext";
 import { normalizeWorkspaceRole } from "../utils/roles";
 
-type PanelView = "projects" | "workspace-members";
+type PanelView = "projects" | "workspace-members" | "knowledge-base";
 
 type Project = {
   id: string;
@@ -375,6 +376,7 @@ export default function ProjectsPage() {
   }, [workspaceId, workspaceName, setWorkspaceRole]);
 
   const isProjectsView = activeView === "projects";
+  const isKnowledgeBaseView = activeView === "knowledge-base";
 
   if (selectedProjectId) {
     return (
@@ -386,6 +388,10 @@ export default function ProjectsPage() {
           setProjects((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))
         }
         onBack={() => setSelectedProjectId(null)}
+        onOpenKnowledgeBase={() => {
+          setSelectedProjectId(null);
+          setActiveView("knowledge-base");
+        }}
       />
     );
   }
@@ -516,6 +522,16 @@ export default function ProjectsPage() {
                     >
                       Members
                     </button>
+                    <button
+                      onClick={() => handleWorkspaceNavigation(ws, "knowledge-base")}
+                      className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
+                        isActiveWorkspace && activeView === "knowledge-base"
+                          ? "bg-blue-50 text-blue-700"
+                          : "text-slate-500 hover:bg-slate-100"
+                      }`}
+                    >
+                      Knowledge Base
+                    </button>
                   </div>
                 </div>
               );
@@ -576,6 +592,8 @@ export default function ProjectsPage() {
               <p className="text-sm text-slate-500">
                 {isProjectsView
                   ? "Projects and artifacts scoped to this workspace."
+                  : isKnowledgeBaseView
+                  ? "Workspace knowledge base for documents, insights, and AI context."
                   : "Workspace settings → Members. Manage roles and invitations."}
               </p>
             </div>
@@ -611,7 +629,7 @@ export default function ProjectsPage() {
             </div>
           </header>
 
-          {(successMessage || errorMessage) && (
+          {isProjectsView && (successMessage || errorMessage) && (
             <div className="mt-6 space-y-2">
               {successMessage && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 shadow-sm">
@@ -708,7 +726,7 @@ export default function ProjectsPage() {
                 </div>
               )}
             </section>
-          ) : (
+          ) : activeView === "workspace-members" ? (
             <WorkspaceMembersPanel
               workspaceName={workspaceName}
               workspaceRole={workspaceRole}
@@ -722,6 +740,13 @@ export default function ProjectsPage() {
               onInvite={inviteWorkspaceCollaborator}
               onRoleChange={handleMemberRoleChange}
               onRemoveMember={handleRemoveMember}
+            />
+          ) : (
+            <KnowledgeBasePanel
+              workspaceId={workspaceId}
+              workspaceRole={workspaceRole}
+              userId={userId}
+              projectOptions={sortedProjects.map((project) => ({ id: project.id, label: project.title }))}
             />
           )}
         </main>

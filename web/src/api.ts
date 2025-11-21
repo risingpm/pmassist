@@ -4,6 +4,7 @@ export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000"
 
 export type WorkspaceRole = "admin" | "editor" | "viewer";
 export type ProjectRole = "owner" | "contributor" | "viewer";
+export type KnowledgeBaseEntryType = "document" | "prd" | "insight" | "research" | "repo" | "ai_output";
 
 const MISSING_USER_ERROR = "User session missing. Please sign in again.";
 
@@ -85,12 +86,77 @@ export type ForgotPasswordResponse = {
   expires_at: string;
 };
 
+export type KnowledgeBaseContextItem = {
+  id: string;
+  title: string;
+  type: KnowledgeBaseEntryType;
+  snippet: string;
+};
+
+export type KnowledgeBase = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  created_at: string;
+};
+
+export type KnowledgeBaseEntry = {
+  id: string;
+  kb_id: string;
+  type: KnowledgeBaseEntryType;
+  title: string;
+  content?: string | null;
+  file_url?: string | null;
+  source_url?: string | null;
+  created_by?: string | null;
+  project_id?: string | null;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type KnowledgeSearchResult = {
+  id: string;
+  filename?: string | null;
+  content?: string | null;
+  uploaded_at: string;
+  title?: string | null;
+  type: KnowledgeBaseEntryType;
+  project_id?: string | null;
+};
+
+export type KnowledgeBaseEntryPayload = {
+  type: KnowledgeBaseEntryType;
+  title: string;
+  content?: string | null;
+  source_url?: string | null;
+  project_id?: string | null;
+  tags?: string[];
+};
+
+export type PRDRecord = {
+  id: string;
+  project_id: string;
+  feature_name?: string | null;
+  description?: string | null;
+  goals?: string | null;
+  content?: string | null;
+  version: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  workspace_id?: string | null;
+  context_entries?: KnowledgeBaseContextItem[] | null;
+};
+
 export type RoadmapGenerateResponse = {
   message: string;
   conversation_history: ChatMessage[];
   roadmap?: string | null;
   action: "ask_followup" | "present_roadmap";
   suggestions?: string[] | null;
+  context_entries?: KnowledgeBaseContextItem[] | null;
 };
 
 export type ProjectComment = {
@@ -477,7 +543,11 @@ export async function updateRoadmap(projectId: string, workspaceId: string, cont
 }
 
 // ---------------- PRDs ----------------
-export async function createPrd(projectId: string, workspaceId: string, body: { feature_name: string; prompt: string }) {
+export async function createPrd(
+  projectId: string,
+  workspaceId: string,
+  body: { feature_name: string; prompt: string }
+): Promise<PRDRecord> {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prd`, workspaceId), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -487,19 +557,24 @@ export async function createPrd(projectId: string, workspaceId: string, body: { 
   return res.json();
 }
 
-export async function getPrds(projectId: string, workspaceId: string) {
+export async function getPrds(projectId: string, workspaceId: string): Promise<PRDRecord[]> {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch PRDs");
   return res.json();
 }
 
-export async function getPrd(projectId: string, prdId: string, workspaceId: string) {
+export async function getPrd(projectId: string, prdId: string, workspaceId: string): Promise<PRDRecord> {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch PRD");
   return res.json();
 }
 
-export async function refinePrd(projectId: string, prdId: string, workspaceId: string, instructions: string) {
+export async function refinePrd(
+  projectId: string,
+  prdId: string,
+  workspaceId: string,
+  instructions: string
+): Promise<PRDRecord> {
   const res = await fetch(
     workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/refine`, workspaceId),
     {
@@ -508,8 +583,7 @@ export async function refinePrd(projectId: string, prdId: string, workspaceId: s
     body: JSON.stringify({ instructions })
   });
   if (!res.ok) throw new Error("Failed to refine PRD");
-  const data = await res.json();
-  return data.content;
+  return res.json();
 }
 
 export async function deletePrd(projectId: string, prdId: string, workspaceId: string) {
@@ -879,6 +953,112 @@ export async function getWorkspaceInvitations(
   const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invitations?${params}`);
   if (!res.ok) throw new Error("Failed to load invitations");
   return res.json();
+}
+
+// ---------------- Knowledge Base ----------------
+export async function getKnowledgeBase(workspaceId: string, userId?: string | null): Promise<KnowledgeBase> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/knowledge-base/workspaces/${workspaceId}`, workspaceId, userId));
+  if (!res.ok) throw new Error("Failed to load knowledge base");
+  return res.json();
+}
+
+export async function listKnowledgeBaseEntries(
+  workspaceId: string,
+  filters: { type?: KnowledgeBaseEntryType; search?: string; limit?: number; projectId?: string } = {},
+  userId?: string | null
+): Promise<KnowledgeBaseEntry[]> {
+  const extra: Record<string, string | undefined> = {};
+  if (filters.type) extra.type = filters.type;
+  if (filters.search) extra.search = filters.search;
+  if (filters.limit) extra.limit = String(filters.limit);
+  if (filters.projectId) extra.project_id = filters.projectId;
+  const res = await fetch(workspaceUrl(`${API_BASE}/knowledge-base/workspaces/${workspaceId}/entries`, workspaceId, userId, extra));
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load knowledge base entries");
+  }
+  return res.json();
+}
+
+export async function createKnowledgeBaseEntry(
+  workspaceId: string,
+  payload: KnowledgeBaseEntryPayload,
+  userId?: string | null
+): Promise<KnowledgeBaseEntry> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/knowledge-base/workspaces/${workspaceId}/entries`, workspaceId, userId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to create knowledge base entry");
+  }
+  return res.json();
+}
+
+export async function uploadKnowledgeBaseEntry(
+  workspaceId: string,
+  data: FormData,
+  userId?: string | null
+): Promise<KnowledgeBaseEntry> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/knowledge-base/workspaces/${workspaceId}/entries/upload`, workspaceId, userId), {
+    method: "POST",
+    body: data,
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to upload entry");
+  }
+  return res.json();
+}
+
+export async function updateKnowledgeBaseEntry(
+  workspaceId: string,
+  entryId: string,
+  payload: Partial<KnowledgeBaseEntryPayload>,
+  userId?: string | null
+): Promise<KnowledgeBaseEntry> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/knowledge-base/entries/${entryId}`, workspaceId, userId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to update entry");
+  }
+  return res.json();
+}
+
+export async function deleteKnowledgeBaseEntry(workspaceId: string, entryId: string, userId?: string | null) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/knowledge-base/entries/${entryId}`, workspaceId, userId), {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to delete entry");
+  }
+}
+
+export async function searchKnowledgeBase(
+  workspaceId: string,
+  query: string,
+  entryType?: KnowledgeBaseEntryType,
+  userId?: string | null,
+  projectId?: string | null
+): Promise<KnowledgeSearchResult[]> {
+  const extra: Record<string, string | undefined> = {};
+  if (entryType) extra.entry_type = entryType;
+  if (projectId) extra.project_id = projectId;
+  const params = buildWorkspaceQuery(workspaceId, userId, { query, ...extra });
+  const res = await fetch(`${API_BASE}/knowledge/search/${workspaceId}?${params}`);
+  if (!res.ok) throw new Error("Failed to search knowledge base");
+  return res.json();
+}
+
+export function knowledgeEntryDownloadUrl(workspaceId: string, entryId: string, userId?: string | null) {
+  return workspaceUrl(`${API_BASE}/knowledge-base/entries/${entryId}/download`, workspaceId, userId ?? undefined);
 }
 
 export async function getProjectMembers(

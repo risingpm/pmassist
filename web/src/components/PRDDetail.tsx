@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getPrd, refinePrd, exportPrd, deletePrd, type ProjectRole } from "../api";
+import { getPrd, refinePrd, exportPrd, deletePrd, type ProjectRole, type KnowledgeBaseContextItem } from "../api";
 
 type PRDDetailProps = {
   projectId: string;
@@ -17,6 +17,7 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const canEdit = projectRole === "owner" || projectRole === "contributor";
+  const [contextEntries, setContextEntries] = useState<KnowledgeBaseContextItem[]>([]);
 
   // Fetch PRD when component mounts
   useEffect(() => {
@@ -25,15 +26,16 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
         setError("Workspace context missing. Go back and select a workspace.");
         return;
       }
-      setLoading(true);
-      try {
-        const data = await getPrd(projectId, prdId, workspaceId);
-        setPrd(data);
-        setError(null);
-      } catch (err) {
-        console.error("Failed to load PRD:", err);
-        setError("⚠️ Failed to load PRD");
-      } finally {
+    setLoading(true);
+    try {
+      const data = await getPrd(projectId, prdId, workspaceId);
+      setPrd(data);
+      setContextEntries(data.context_entries ?? []);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to load PRD:", err);
+      setError("⚠️ Failed to load PRD");
+    } finally {
         setLoading(false);
       }
     };
@@ -46,13 +48,10 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
     if (!refineText.trim() || !canEdit) return;
     setLoading(true);
     try {
-      // ✅ Pass both projectId + prdId, return Markdown string
       if (!workspaceId) throw new Error("Missing workspace context");
-      const newContent = await refinePrd(projectId, prdId, workspaceId, refineText);
-
-      // ✅ Update only the content field, keep rest of PRD intact
-      setPrd((prev: any) => (prev ? { ...prev, content: newContent } : prev));
-
+      const refined = await refinePrd(projectId, prdId, workspaceId, refineText);
+      setPrd(refined);
+      setContextEntries(refined.context_entries ?? []);
       setRefineText("");
       setError(null);
       setSuccess("✅ PRD refined successfully");
@@ -121,6 +120,21 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
       {loading && <p className="text-gray-500">Loading...</p>}
       {error && <p className="text-red-500">{error}</p>}
       {success && <p className="text-green-600">{success}</p>}
+      {contextEntries.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Context used
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-slate-600">
+            {contextEntries.map((entry) => (
+              <li key={entry.id}>
+                <span className="font-semibold text-slate-900">{entry.title}</span> · {entry.type}
+                <p className="text-xs text-slate-500">{entry.snippet}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {prd ? (
         <div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getPrds, createPrd, deletePrd, type ProjectRole } from "../api";
+import { getPrds, createPrd, deletePrd, type ProjectRole, type KnowledgeBaseContextItem, type PRDRecord } from "../api";
 
 type PRDListProps = {
   projectId: string;
@@ -16,10 +16,11 @@ export default function PRDList({
   onSelectPrd,
   onBack,
 }: PRDListProps) {
-  const [prds, setPrds] = useState<any[]>([]);
+  const [prds, setPrds] = useState<PRDRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [contextEntries, setContextEntries] = useState<KnowledgeBaseContextItem[]>([]);
 
   // new state for form
   const [featureName, setFeatureName] = useState("");
@@ -35,8 +36,12 @@ export default function PRDList({
     setLoading(true);
     getPrds(projectId, workspaceId)
       .then((data) => {
-        console.log("PRDs response:", data);
         setPrds(data || []);
+        if (data && data.length > 0) {
+          setContextEntries(data[0].context_entries ?? []);
+        } else {
+          setContextEntries([]);
+        }
       })
       .catch((err) => {
         console.error("Failed to load PRDs:", err);
@@ -55,12 +60,13 @@ export default function PRDList({
     setLoading(true);
     try {
       if (!workspaceId) throw new Error("Missing workspace context");
-      await createPrd(projectId, workspaceId, {
+      const created = await createPrd(projectId, workspaceId, {
         feature_name: featureName,
         prompt: prompt,
       });
       const refreshed = await getPrds(projectId, workspaceId);
       setPrds(refreshed || []);
+      setContextEntries(created.context_entries ?? []);
       setFeatureName("");
       setPrompt("");
       setError(null);
@@ -86,7 +92,13 @@ export default function PRDList({
     try {
       if (!workspaceId) throw new Error("Missing workspace context");
       await deletePrd(projectId, prdId, workspaceId);
-      setPrds((prev) => prev.filter((p) => p.id !== prdId));
+      const refreshed = await getPrds(projectId, workspaceId);
+      setPrds(refreshed || []);
+      if (refreshed && refreshed.length > 0) {
+        setContextEntries(refreshed[0].context_entries ?? []);
+      } else {
+        setContextEntries([]);
+      }
       setError(null);
       setSuccess("🗑️ PRD deleted successfully");
     } catch (err) {
@@ -164,6 +176,22 @@ export default function PRDList({
       {error && <p className="text-red-500">{error}</p>}
       {success && <p className="text-green-600">{success}</p>}
 
+      {contextEntries.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Context used
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-slate-600">
+            {contextEntries.map((entry) => (
+              <li key={entry.id}>
+                <span className="font-semibold text-slate-900">{entry.title}</span> · {entry.type}
+                <p className="text-xs text-slate-500">{entry.snippet}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* PRDs Table */}
       {prds.length === 0 ? (
         <p className="text-gray-500">
@@ -180,7 +208,7 @@ export default function PRDList({
             </tr>
           </thead>
           <tbody>
-            {prds.map((prd: any) => (
+            {prds.map((prd) => (
               <tr key={prd.id} className="hover:bg-gray-50">
                 <td className="p-2 border font-medium">
                   {prd.feature_name || `PRD ${prd.id}`}

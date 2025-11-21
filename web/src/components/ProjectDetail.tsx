@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import SafeMarkdown from "./SafeMarkdown";
 import PRDList from "./PRDList";
 import PRDDetail from "./PRDDetail";
@@ -7,6 +7,7 @@ import ProjectLinks from "./ProjectLinks";
 import ProjectPrototypes from "./ProjectPrototypes";
 import ProjectPrototypeAgent from "./ProjectPrototypeAgent";
 import ProjectMembersPanel from "./ProjectMembersPanel";
+import UploadEntryModal from "./UploadEntryModal";
 import {
   getProject,
   fetchRoadmap as fetchSavedRoadmap,
@@ -35,6 +36,16 @@ import {
   type PrototypeSession,
   type Prototype,
   type WorkspaceRole,
+  type KnowledgeBaseContextItem,
+  type KnowledgeBaseEntry,
+  type KnowledgeBaseEntryType,
+  type KnowledgeBaseEntryPayload,
+  type KnowledgeSearchResult,
+  listKnowledgeBaseEntries,
+  createKnowledgeBaseEntry,
+  uploadKnowledgeBaseEntry,
+  searchKnowledgeBase,
+  knowledgeEntryDownloadUrl,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
 import { useUserRole } from "../context/RoleContext";
@@ -88,14 +99,6 @@ function formatRoadmapForDisplay(content: string): string {
   }
 }
 
-type Document = {
-  id: string;
-  filename: string;
-  chunk_index: number;
-  uploaded_at: string;
-  has_embedding: boolean;
-};
-
 type ProjectDetailProps = {
   projectId: string;
   workspaceId: string | null;
@@ -109,6 +112,7 @@ type ProjectDetailProps = {
     target_personas?: string[] | null;
   }) => void;
   onBack: () => void;
+  onOpenKnowledgeBase?: () => void;
 };
 
 type ConversationEntry = ChatMessage & { id: string };
@@ -124,6 +128,7 @@ export default function ProjectDetail({
   workspaceRole,
   onProjectUpdated,
   onBack,
+  onOpenKnowledgeBase,
 }: ProjectDetailProps) {
   const { projectRoles, refreshProjectRole } = useUserRole();
   const userId = useMemo(() => {
@@ -163,10 +168,8 @@ export default function ProjectDetail({
   });
   const canEditProject = projectRole === "owner" || projectRole === "contributor";
   const canManageProjectMembers = projectRole === "owner" || workspaceRole === "admin";
+  const canEditKnowledgeBase = workspaceRole === "admin" || workspaceRole === "editor";
 
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [file, setFile] = useState<File | null>(null);
-  const [loadingDocs, setLoadingDocs] = useState(false);
   const [projectInfo, setProjectInfo] = useState<{
     title: string;
     description: string;
@@ -181,6 +184,27 @@ export default function ProjectDetail({
   const [knowledgeTab, setKnowledgeTab] = useState<
     "documents" | "comments" | "links" | "insights"
   >("documents");
+  const [projectEntries, setProjectEntries] = useState<KnowledgeBaseEntry[]>([]);
+  const [projectEntriesLoading, setProjectEntriesLoading] = useState(false);
+  const [projectEntriesError, setProjectEntriesError] = useState<string | null>(null);
+  const [projectEntryType, setProjectEntryType] = useState<KnowledgeBaseEntryType | "all">("all");
+  const [projectEntrySearch, setProjectEntrySearch] = useState("");
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [projectEntriesSemantic, setProjectEntriesSemantic] = useState(false);
+  const projectEntryFilters = useMemo<
+    Array<{ id: KnowledgeBaseEntryType | "all"; label: string }>
+  >(
+    () => [
+      { id: "all", label: "All" },
+      { id: "document", label: "Documents" },
+      { id: "repo", label: "Repos" },
+      { id: "research", label: "Research" },
+      { id: "insight", label: "Insights" },
+      { id: "prd", label: "PRDs" },
+      { id: "ai_output", label: "AI outputs" },
+    ],
+    []
+  );
   const [selectedPrd, setSelectedPrd] = useState<{
     projectId: string;
     prdId: string;
@@ -205,6 +229,7 @@ export default function ProjectDetail({
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
+  const [roadmapContext, setRoadmapContext] = useState<KnowledgeBaseContextItem[]>([]);
 
   const [roadmapPreview, setRoadmapPreview] = useState<RoadmapPreview | null>(null);
   const [isEditingRoadmap, setIsEditingRoadmap] = useState(false);
@@ -267,81 +292,97 @@ export default function ProjectDetail({
     });
   }, [projectInfo]);
 
-  // ------------------- Document handlers -------------------
-  const fetchDocuments = async () => {
-    if (!effectiveWorkspaceId || !userId) {
-      setDocuments([]);
+  // ------------------- Project knowledge handlers -------------------
+  const loadProjectEntries = useCallback(async () => {
+    if (!effectiveWorkspaceId) {
+      setProjectEntries([]);
+      setProjectEntriesSemantic(false);
       return;
     }
-    setLoadingDocs(true);
+    setProjectEntriesLoading(true);
+    setProjectEntriesError(null);
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`
-      );
-      const data = await res.json();
-      setDocuments(data);
-    } catch (err) {
-      console.error("Failed to fetch documents", err);
+      const trimmedSearch = projectEntrySearch.trim();
+      const useSemantic = trimmedSearch.length >= 3;
+      if (useSemantic) {
+        const semanticResults = await searchKnowledgeBase(
+          effectiveWorkspaceId,
+          trimmedSearch,
+          projectEntryType === "all" ? undefined : projectEntryType,
+          userId ?? undefined,
+          projectId
+        );
+        const normalized: KnowledgeBaseEntry[] = semanticResults.map((result: KnowledgeSearchResult) => ({
+          id: result.id,
+          kb_id: effectiveWorkspaceId,
+          type: result.type,
+          title: result.title || result.filename || "Untitled entry",
+          content: result.content || "",
+          file_url: null,
+          source_url: null,
+          created_by: null,
+          project_id: result.project_id ?? projectId ?? null,
+          tags: [],
+          created_at: result.uploaded_at,
+          updated_at: result.uploaded_at,
+        }));
+        setProjectEntries(normalized);
+        setProjectEntriesSemantic(true);
+      } else {
+        const filters: {
+          type?: KnowledgeBaseEntryType;
+          search?: string;
+          projectId?: string;
+        } = { projectId };
+        if (projectEntryType !== "all") {
+          filters.type = projectEntryType;
+        }
+        if (trimmedSearch) {
+          filters.search = trimmedSearch;
+        }
+        const list = await listKnowledgeBaseEntries(effectiveWorkspaceId, filters, userId ?? undefined);
+        setProjectEntries(list);
+        setProjectEntriesSemantic(false);
+      }
+    } catch (err: any) {
+      setProjectEntriesError(err.message || "Failed to load project knowledge entries.");
     } finally {
-      setLoadingDocs(false);
+      setProjectEntriesLoading(false);
     }
+  }, [effectiveWorkspaceId, projectEntryType, projectEntrySearch, projectId, userId]);
+
+  useEffect(() => {
+    if (knowledgeTab !== "documents") return;
+    loadProjectEntries();
+  }, [knowledgeTab, loadProjectEntries]);
+
+  const handleCreateProjectEntry = async (payload: KnowledgeBaseEntryPayload) => {
+    if (!effectiveWorkspaceId) return;
+    const finalPayload = {
+      ...payload,
+      project_id: payload.project_id ?? projectId,
+    };
+    await createKnowledgeBaseEntry(effectiveWorkspaceId, finalPayload, userId ?? undefined);
+    await loadProjectEntries();
   };
 
-  const handleUpload = async () => {
-    if (!file || !canEditProject || !userId) return;
-    setLoadingDocs(true);
-
+  const handleUploadProjectEntry = async (
+    file: File,
+    payload: { type: KnowledgeBaseEntryType; title?: string; tags?: string[]; project_id?: string | null }
+  ) => {
+    if (!effectiveWorkspaceId) return;
     const formData = new FormData();
     formData.append("file", file);
-
-    try {
-      if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
-      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`, {
-        method: "POST",
-        body: formData,
-      });
-      setFile(null);
-      await fetchDocuments();
-    } catch (err) {
-      console.error("Failed to upload document", err);
-    } finally {
-      setLoadingDocs(false);
+    formData.append("entry_type", payload.type);
+    if (payload.title) formData.append("title", payload.title);
+    if (payload.tags?.length) formData.append("tags", payload.tags.join(","));
+    const nextProjectId = payload.project_id ?? projectId;
+    if (nextProjectId) {
+      formData.append("project_id", nextProjectId);
     }
+    await uploadKnowledgeBaseEntry(effectiveWorkspaceId, formData, userId ?? undefined);
+    await loadProjectEntries();
   };
-
-  const handleEmbed = async () => {
-    if (!canEditProject || !userId) return;
-    setLoadingDocs(true);
-    try {
-      if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
-      await fetch(`${import.meta.env.VITE_API_BASE}/documents/embed/${projectId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`, {
-        method: "POST",
-      });
-      await fetchDocuments();
-    } catch (err) {
-      console.error("Failed to trigger embeddings", err);
-    } finally {
-      setLoadingDocs(false);
-    }
-  };
-
-  const handleDeleteDocument = async (docId: string) => {
-    if (!canEditProject || !userId) return;
-    try {
-      if (!effectiveWorkspaceId) throw new Error("Missing workspace context");
-      await fetch(`${import.meta.env.VITE_API_BASE}/documents/${projectId}/${docId}?workspace_id=${effectiveWorkspaceId}&user_id=${userId}`, {
-        method: "DELETE",
-      });
-      await fetchDocuments();
-    } catch (err) {
-      console.error("Failed to delete document", err);
-    }
-  };
-
-  const groupedDocuments = useMemo(
-    () => [...new Map(documents.map((d) => [d.filename, d])).values()],
-    [documents]
-  );
 
   // ------------------- Comment handlers -------------------
   const loadComments = async () => {
@@ -573,23 +614,18 @@ export default function ProjectDetail({
   };
 
   const knowledgeSummary = useMemo(() => {
-    const latestDocument = documents.reduce<Document | null>((acc, doc) => {
-      if (!acc) return doc;
-      const currentTime = new Date(doc.uploaded_at).getTime();
-      const accTime = new Date(acc.uploaded_at).getTime();
-      return currentTime > accTime ? doc : acc;
-    }, null);
-
     const latestComment = comments.length > 0 ? comments[0] : null;
     const latestLink = links.length > 0 ? links[0] : null;
     const latestPrototype = prototypes.length > 0 ? prototypes[0] : null;
+    const documentEntries = projectEntries.filter((entry) =>
+      ["document", "repo", "research"].includes(entry.type)
+    );
+    const latestDocument = documentEntries.length > 0 ? documentEntries[0] : null;
 
     return {
-      totalDocuments: groupedDocuments.length,
-      totalDocumentChunks: documents.length,
-      latestDocumentUploadedAt: latestDocument
-        ? new Date(latestDocument.uploaded_at).toLocaleString()
-        : null,
+      totalDocuments: documentEntries.length,
+      totalDocumentChunks: documentEntries.length,
+      latestDocumentUploadedAt: latestDocument ? new Date(latestDocument.updated_at).toLocaleString() : null,
       totalComments: comments.length,
       latestComment,
       totalLinks: links.length,
@@ -597,7 +633,7 @@ export default function ProjectDetail({
       totalPrototypes: prototypes.length,
       latestPrototype,
     };
-  }, [documents, groupedDocuments, comments, links, prototypes]);
+  }, [comments, links, prototypes, projectEntries]);
 
   // ------------------- Roadmap handlers -------------------
   const loadRoadmap = async () => {
@@ -658,6 +694,7 @@ export default function ProjectDetail({
         userId ?? undefined,
         effectiveWorkspaceId
       );
+      setRoadmapContext(response.context_entries ?? []);
 
       const mapped = response.conversation_history.map<ConversationEntry>((msg) => ({
         ...msg,
@@ -959,66 +996,150 @@ export default function ProjectDetail({
             </div>
 
             {knowledgeTab === "documents" && (
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-xl font-semibold text-slate-900">Project Documents</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Upload supporting artefacts to improve roadmap and PRD quality.
-                  </p>
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold text-slate-900">Project Knowledge</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Entries tagged to this project from the workspace Knowledge Base.
+                    </p>
+                    {!canEditKnowledgeBase && (
+                      <p className="mt-2 text-xs text-amber-600">
+                        You have viewer access and cannot upload or edit entries.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => {
+                        if (onOpenKnowledgeBase) {
+                          onOpenKnowledgeBase();
+                        } else {
+                          onBack();
+                        }
+                      }}
+                      className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                    >
+                      Workspace Knowledge Base
+                    </button>
+                    {canEditKnowledgeBase && (
+                      <button
+                        onClick={() => setShowEntryModal(true)}
+                        className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                      >
+                        Add entry
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center">
+                  <div className="flex flex-wrap gap-2">
+                    {projectEntryFilters.map((filter) => (
+                      <button
+                        key={filter.id}
+                        onClick={() => setProjectEntryType(filter.id)}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                          projectEntryType === filter.id
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {filter.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 md:ml-auto">
                     <input
-                      type="file"
-                      disabled={!canEditProject}
-                      onChange={(e) => setFile(e.target.files?.[0] || null)}
-                      className="text-sm"
+                      value={projectEntrySearch}
+                      onChange={(event) => setProjectEntrySearch(event.target.value)}
+                      placeholder="Search this project’s entries..."
+                      className="w-full rounded-full border border-slate-200 px-4 py-1 text-sm md:w-64"
                     />
                     <button
-                      onClick={handleUpload}
-                      disabled={!canEditProject || loadingDocs || !file}
-                      className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                      type="button"
+                      onClick={() => loadProjectEntries()}
+                      className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
                     >
-                      {loadingDocs ? "Uploading..." : "Upload"}
-                    </button>
-                    <button
-                      onClick={handleEmbed}
-                      disabled={!canEditProject || loadingDocs}
-                      className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-60"
-                    >
-                      Embed
+                      Refresh
                     </button>
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h3 className="text-lg font-semibold text-slate-800">Uploaded Files</h3>
-                  {groupedDocuments.length === 0 ? (
-                    <p className="mt-3 text-sm text-slate-500">No documents uploaded yet.</p>
-                  ) : (
-                    <ul className="mt-4 space-y-3">
-                      {groupedDocuments.map((doc) => (
-                        <li
-                          key={doc.id}
-                          className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-                        >
-                          <div>
-                            <p className="font-medium text-slate-800">{doc.filename}</p>
-                            <p className="text-xs text-slate-500">
-                              Uploaded {new Date(doc.uploaded_at).toLocaleString()}
-                            </p>
-                          </div>
-                          {canEditProject && (
-                            <button
-                              onClick={() => handleDeleteDocument(doc.id)}
-                              className="text-sm font-semibold text-rose-500 transition hover:text-rose-600"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                {projectEntriesSemantic && projectEntrySearch.trim().length >= 3 && (
+                  <p className="text-xs text-slate-500">
+                    Showing semantic matches for “{projectEntrySearch.trim()}”.
+                  </p>
+                )}
+
+                {projectEntriesError && (
+                  <p className="mt-3 text-sm text-rose-600">{projectEntriesError}</p>
+                )}
+
+                {projectEntriesLoading ? (
+                  <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-6 text-sm text-slate-500">
+                    Loading project entries...
+                  </div>
+                ) : projectEntries.length === 0 ? (
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                    No knowledge base entries are tagged to this project yet.
+                    {canEditKnowledgeBase && " Use the button above to add one."}
+                  </div>
+                ) : (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          <th className="pb-3 pr-3">Title</th>
+                          <th className="pb-3 pr-3">Type</th>
+                          <th className="pb-3 pr-3">Tags</th>
+                          <th className="pb-3 pr-3">Updated</th>
+                          <th className="pb-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {projectEntries.map((entry) => (
+                          <tr key={entry.id} className="border-t border-slate-100 text-slate-600">
+                            <td className="py-3 pr-3">
+                              <p className="font-semibold text-slate-900">{entry.title}</p>
+                              {entry.content && (
+                                <p className="text-xs text-slate-500">
+                                  {entry.content.slice(0, 120)}
+                                  {entry.content.length > 120 ? "..." : ""}
+                                </p>
+                              )}
+                            </td>
+                            <td className="py-3 pr-3">
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                                {entry.type}
+                              </span>
+                            </td>
+                            <td className="py-3 pr-3 text-xs text-slate-500">
+                              {entry.tags.length > 0 ? entry.tags.join(", ") : "—"}
+                            </td>
+                            <td className="py-3 pr-3 text-xs text-slate-500">
+                              {new Date(entry.updated_at).toLocaleString()}
+                            </td>
+                            <td className="py-3 text-right">
+                              <div className="flex items-center justify-end gap-3">
+                                {entry.file_url && effectiveWorkspaceId && (
+                                  <a
+                                    href={knowledgeEntryDownloadUrl(effectiveWorkspaceId, entry.id, userId ?? undefined)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-sm font-semibold text-slate-600 hover:text-slate-900"
+                                  >
+                                    Download
+                                  </a>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1396,6 +1517,21 @@ export default function ProjectDetail({
                 </div>
               )}
             </div>
+            {roadmapContext.length > 0 && (
+              <div className="border-t border-slate-200 px-6 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Context used
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-slate-600">
+                  {roadmapContext.map((entry) => (
+                    <li key={entry.id}>
+                      <span className="font-semibold text-slate-900">{entry.title}</span> · {entry.type}
+                      <p className="text-xs text-slate-500">{entry.snippet}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {generateError && (
               <p className="px-6 text-sm text-rose-500">{generateError}</p>
@@ -1599,6 +1735,17 @@ export default function ProjectDetail({
             </form>
           </div>
         </div>
+      )}
+      {showEntryModal && effectiveWorkspaceId && (
+        <UploadEntryModal
+          open={showEntryModal}
+          onClose={() => setShowEntryModal(false)}
+          onCreateText={handleCreateProjectEntry}
+          onUploadFile={handleUploadProjectEntry}
+          defaultProjectId={projectId}
+          projectIdLocked
+          projectOptions={[{ id: projectId, label: projectInfo?.title || "This project" }]}
+        />
       )}
     </div>
   );
