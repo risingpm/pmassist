@@ -5,12 +5,13 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from uuid import UUID
 from .database import Base, engine, SessionLocal, get_db
-from backend.knowledge import documents, search, comments, prototypes, links, prototype_agent
+from backend.knowledge import search, comments, prototypes, links, prototype_agent
 from backend.knowledge import roadmap_ai
 from .database import Base, engine, SessionLocal
 from .models import Project
 from . import prd, agent, auth, models
 from .workspaces import workspaces_router, user_workspaces_router
+from . import knowledge_base
 from backend import project_members
 from backend.rbac import ensure_membership, ensure_project_access
 
@@ -197,7 +198,6 @@ def delete_project(project_id: str, workspace_id: UUID, user_id: UUID, db: Sessi
 # Include Feature Routers
 # -----------------------------
 app.include_router(roadmap_ai.router)
-app.include_router(documents.router)
 app.include_router(comments.router)
 app.include_router(search.router)
 app.include_router(prototypes.router)
@@ -205,6 +205,7 @@ app.include_router(links.router)
 app.include_router(prototype_agent.router)
 app.include_router(prd.router)
 app.include_router(agent.router)
+app.include_router(knowledge_base.router)
 app.include_router(project_members.router)
 app.include_router(workspaces_router)
 app.include_router(user_workspaces_router)

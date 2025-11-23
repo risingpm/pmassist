@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { getPrd, refinePrd, exportPrd, deletePrd, type ProjectRole, type KnowledgeBaseContextItem } from "../api";
+import ContextUsedPanel from "./ContextUsedPanel";
 
 type PRDDetailProps = {
   projectId: string;
@@ -120,21 +121,7 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
       {loading && <p className="text-gray-500">Loading...</p>}
       {error && <p className="text-red-500">{error}</p>}
       {success && <p className="text-green-600">{success}</p>}
-      {contextEntries.length > 0 && (
-        <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Context used
-          </p>
-          <ul className="mt-2 space-y-1 text-sm text-slate-600">
-            {contextEntries.map((entry) => (
-              <li key={entry.id}>
-                <span className="font-semibold text-slate-900">{entry.title}</span> · {entry.type}
-                <p className="text-xs text-slate-500">{entry.snippet}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <ContextUsedPanel entries={contextEntries} />
 
       {prd ? (
         <div>

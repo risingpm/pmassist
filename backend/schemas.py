@@ -34,6 +34,7 @@ class PRDResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     workspace_id: UUID | None = None
+    context_entries: list["KnowledgeBaseContextItem"] | None = None
 
     class Config:
         from_attributes = True
@@ -79,6 +80,7 @@ class RoadmapGenerateResponse(BaseModel):
     roadmap: str | None = None
     action: str
     suggestions: list[str] | None = None
+    context_entries: list["KnowledgeBaseContextItem"] | None = None
 
 
 class RoadmapUpdateRequest(BaseModel):
@@ -198,6 +200,60 @@ class WorkspaceInvitationResponse(BaseModel):
 
 class WorkspaceInvitationAcceptRequest(BaseModel):
     user_id: UUID
+
+
+# ---------------------------------------------------------
+# Knowledge Base
+# ---------------------------------------------------------
+
+KnowledgeBaseEntryType = Literal["document", "prd", "insight", "research", "repo", "ai_output"]
+
+
+class KnowledgeBaseResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    name: str
+    description: str | None = None
+    created_at: datetime
+
+
+class KnowledgeBaseEntryResponse(BaseModel):
+    id: UUID
+    kb_id: UUID
+    type: KnowledgeBaseEntryType
+    title: str
+    content: str | None = None
+    file_url: str | None = None
+    source_url: str | None = None
+    created_by: UUID | None = None
+    created_by_email: EmailStr | None = None
+    project_id: UUID | None = None
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeBaseEntryCreate(BaseModel):
+    type: KnowledgeBaseEntryType = "insight"
+    title: str
+    content: str | None = None
+    source_url: str | None = None
+    project_id: UUID | None = None
+    tags: list[str] | None = None
+
+
+class KnowledgeBaseEntryUpdate(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    source_url: str | None = None
+    tags: list[str] | None = None
+
+
+class KnowledgeBaseContextItem(BaseModel):
+    id: UUID
+    title: str
+    type: KnowledgeBaseEntryType
+    snippet: str
 
 
 class ProjectMemberResponse(BaseModel):

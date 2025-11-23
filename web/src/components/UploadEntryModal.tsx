@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { KnowledgeBaseEntryPayload, KnowledgeBaseEntryType } from "../api";
 
-const FILE_TYPES: KnowledgeBaseEntryType[] = ["document", "repo", "research"];
-const NOTE_TYPES: KnowledgeBaseEntryType[] = ["insight", "research", "prd", "ai_output"];
+const ENTRY_TYPES: KnowledgeBaseEntryType[] = ["document", "insight", "research", "repo"];
 
 type UploadMode = "file" | "note";
 
@@ -44,14 +43,12 @@ export default function UploadEntryModal({
 
   if (!open) return null;
 
-  const allowedTypes = mode === "file" ? FILE_TYPES : NOTE_TYPES;
-
   const reset = () => {
     setTitle("");
     setContent("");
     setFile(null);
     setTags("");
-    setEntryType(mode === "file" ? FILE_TYPES[0] : NOTE_TYPES[0]);
+    setEntryType(mode === "file" ? "document" : "insight");
     setProjectId(defaultProjectId ?? "");
     setError(null);
     setSubmitting(false);
@@ -60,7 +57,8 @@ export default function UploadEntryModal({
   useEffect(() => {
     if (!open) return;
     setProjectId(defaultProjectId ?? "");
-  }, [open, defaultProjectId]);
+    setEntryType(mode === "file" ? "document" : "insight");
+  }, [open, defaultProjectId, mode]);
 
   const handleClose = () => {
     if (submitting) return;
@@ -127,7 +125,7 @@ export default function UploadEntryModal({
             onClick={() => {
               if (mode === "file") return;
               setMode("file");
-              setEntryType(FILE_TYPES[0]);
+              setEntryType("document");
             }}
             className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${
               mode === "file" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
@@ -140,7 +138,7 @@ export default function UploadEntryModal({
             onClick={() => {
               if (mode === "note") return;
               setMode("note");
-              setEntryType(NOTE_TYPES[0]);
+              setEntryType("insight");
             }}
             className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${
               mode === "note" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
@@ -158,7 +156,7 @@ export default function UploadEntryModal({
               onChange={(event) => setEntryType(event.target.value as KnowledgeBaseEntryType)}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
-              {allowedTypes.map((typeOption) => (
+              {ENTRY_TYPES.map((typeOption) => (
                 <option key={typeOption} value={typeOption}>
                   {typeOption.charAt(0).toUpperCase() + typeOption.slice(1)}
                 </option>
@@ -213,7 +211,7 @@ export default function UploadEntryModal({
               value={tags}
               onChange={(event) => setTags(event.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              placeholder="Comma separated"
+              placeholder="Comma-separated (e.g. release, user-insight)"
             />
           </div>
 
@@ -266,7 +264,7 @@ export default function UploadEntryModal({
               disabled={submitting}
               className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
-              {submitting ? "Saving..." : "Save entry"}
+              {mode === "file" ? (submitting ? "Uploading..." : "Upload entry") : submitting ? "Saving..." : "Save entry"}
             </button>
           </div>
         </form>

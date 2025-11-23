@@ -8,6 +8,7 @@ import ProjectPrototypes from "./ProjectPrototypes";
 import ProjectPrototypeAgent from "./ProjectPrototypeAgent";
 import ProjectMembersPanel from "./ProjectMembersPanel";
 import UploadEntryModal from "./UploadEntryModal";
+import ContextUsedPanel from "./ContextUsedPanel";
 import {
   getProject,
   fetchRoadmap as fetchSavedRoadmap,
@@ -316,13 +317,14 @@ export default function ProjectDetail({
           id: result.id,
           kb_id: effectiveWorkspaceId,
           type: result.type,
-          title: result.title || result.filename || "Untitled entry",
+          title: result.title || "Untitled entry",
           content: result.content || "",
           file_url: null,
           source_url: null,
           created_by: null,
+          created_by_email: null,
           project_id: result.project_id ?? projectId ?? null,
-          tags: [],
+          tags: result.tags ?? [],
           created_at: result.uploaded_at,
           updated_at: result.uploaded_at,
         }));
@@ -1114,9 +1116,22 @@ export default function ProjectDetail({
                                 {entry.type}
                               </span>
                             </td>
-                            <td className="py-3 pr-3 text-xs text-slate-500">
-                              {entry.tags.length > 0 ? entry.tags.join(", ") : "—"}
-                            </td>
+                      <td className="py-3 pr-3 text-xs text-slate-500">
+                        {entry.tags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {entry.tags.map((tag) => (
+                              <span
+                                key={`${entry.id}-${tag}`}
+                                className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                             <td className="py-3 pr-3 text-xs text-slate-500">
                               {new Date(entry.updated_at).toLocaleString()}
                             </td>
@@ -1519,17 +1534,7 @@ export default function ProjectDetail({
             </div>
             {roadmapContext.length > 0 && (
               <div className="border-t border-slate-200 px-6 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Context used
-                </p>
-                <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                  {roadmapContext.map((entry) => (
-                    <li key={entry.id}>
-                      <span className="font-semibold text-slate-900">{entry.title}</span> · {entry.type}
-                      <p className="text-xs text-slate-500">{entry.snippet}</p>
-                    </li>
-                  ))}
-                </ul>
+                <ContextUsedPanel entries={roadmapContext} />
               </div>
             )}
 
