@@ -6,6 +6,7 @@ from .database import get_db
 from . import models, schemas
 from .workspaces import get_project_in_workspace
 from backend.rbac import ensure_project_access
+from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
 
 from openai import OpenAI
 import os
@@ -29,6 +30,40 @@ router = APIRouter(
     tags=["prds"]
 )
 
+
+def _context_items(entries: list[models.KnowledgeBaseEntry]) -> list[schemas.KnowledgeBaseContextItem]:
+    items: list[schemas.KnowledgeBaseContextItem] = []
+    for entry in entries:
+        snippet = build_entry_content(entry, clip=800)
+        if not snippet:
+            snippet = entry.content or ""
+        items.append(
+            schemas.KnowledgeBaseContextItem(
+                id=entry.id,
+                title=entry.title,
+                type=entry.type,
+                snippet=snippet or "",
+            )
+        )
+    return items
+
+
+def _record_prd_entry(db: Session, workspace_id: UUID | None, prd: models.PRD, user_id: UUID | None) -> None:
+    if not workspace_id:
+        return
+    kb = ensure_workspace_kb(db, workspace_id)
+    entry = models.KnowledgeBaseEntry(
+        kb_id=kb.id,
+        type="prd",
+        title=prd.feature_name or prd.project.title if prd.project else "PRD",
+        content=prd.content,
+        created_by=user_id,
+        project_id=prd.project_id,
+        tags=["prd"],
+    )
+    db.add(entry)
+    db.commit()
+
 # -----------------------------
 # Generate a new PRD (Markdown only)
 # -----------------------------
@@ -45,26 +80,26 @@ def generate_prd(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # collect context
-    previous_prds = (
-        db.query(models.PRD)
-        .filter(
-            models.PRD.project_id == project_id,
-            models.PRD.workspace_id.in_([project.workspace_id, None]),
+    context_query = "\n".join(
+        filter(
+            None,
+            [
+                project.title,
+                project.description,
+                project.goals,
+                project.north_star_metric,
+                prd_data.feature_name,
+                prd_data.prompt,
+            ],
         )
-        .all()
     )
-    previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
-
-    docs = (
-        db.query(models.Document)
-        .filter(
-            models.Document.project_id == project_id,
-            models.Document.workspace_id.in_([project.workspace_id, None]),
-        )
-        .all()
+    kb_entries = get_relevant_entries(db, project.workspace_id, context_query, limit=5)
+    context_items = _context_items(kb_entries)
+    context_block = "\n\n".join(
+        f"{item.title} ({item.type})\n{item.snippet}" for item in context_items
     )
-    docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
+    if not context_block:
+        context_block = "No workspace knowledge-base entries yet."
 
     # build prompt
     prompt = f"""
@@ -84,11 +119,8 @@ Goals: {project.goals}
 North Star Metric: {project.north_star_metric or 'Not specified'}
 Target Personas: {', '.join(project.target_personas or []) or 'Not specified'}
 
-Uploaded Documents:
-{docs_text}
-
-Previous PRDs:
-{previous_prds_text}
+Workspace Knowledge Base:
+{context_block}
 
 Task: Generate a PRD for feature: {prd_data.feature_name}
 User instructions: {prd_data.prompt}
@@ -120,7 +152,11 @@ User instructions: {prd_data.prompt}
     db.commit()
     db.refresh(new_prd)
 
-    return new_prd
+    _record_prd_entry(db, project.workspace_id, new_prd, user_id)
+
+    response = schemas.PRDResponse.model_validate(new_prd)
+    response.context_entries = context_items
+    return response
 
 
 # ---------------------------------------------------------
@@ -166,23 +202,31 @@ def refine_prd(
     )
     previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
 
-    # Collect uploaded documents
-    docs = (
-        db.query(models.Document)
-        .filter(
-            models.Document.project_id == project_id,
-            models.Document.workspace_id.in_([project.workspace_id, None]),
+    refine_query = "\n".join(
+        filter(
+            None,
+            [
+                project.title,
+                prd.feature_name,
+                refine_data.instructions,
+                prd.content,
+            ],
         )
-        .all()
     )
-    docs_text = "\n---\n".join([d.content for d in docs]) if docs else "None"
+    kb_entries = get_relevant_entries(db, project.workspace_id, refine_query, limit=5)
+    context_items = _context_items(kb_entries)
+    context_block = "\n\n".join(
+        f"{item.title} ({item.type})\n{item.snippet}" for item in context_items
+    )
+    if not context_block:
+        context_block = "No workspace context available"
 
     # Build structured context for OpenAI
     messages = [
         {"role": "system", "content": "You are an expert product manager who refines PRDs in clean Markdown format."},
         {"role": "user", "content": f"Project context:\nTitle: {project.title}\nDescription: {project.description}\nGoals: {project.goals}\nNorth Star Metric: {project.north_star_metric or 'Not specified'}"},
         {"role": "user", "content": f"Target Personas: {', '.join(project.target_personas or []) or 'Not specified'}"},
-        {"role": "user", "content": f"Uploaded documents:\n{docs_text}"},
+        {"role": "user", "content": f"Workspace knowledge base:\n{context_block}"},
         {"role": "user", "content": f"Other PRDs for reference:\n{previous_prds_text}"},
         {"role": "user", "content": f"Here is the current PRD to refine:\n{prd.content or ''}"},
         {"role": "user", "content": f"Refinement instructions:\n{refine_data.instructions}\n\nPlease update the PRD accordingly while preserving its structure, goals, and context."},
@@ -217,8 +261,10 @@ def refine_prd(
     db.add(refined_prd)
     db.commit()
     db.refresh(refined_prd)
-
-    return refined_prd
+    _record_prd_entry(db, project.workspace_id, refined_prd, user_id)
+    response = schemas.PRDResponse.model_validate(refined_prd)
+    response.context_entries = context_items
+    return response
 
 
 # -----------------------------

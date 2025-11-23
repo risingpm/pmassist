@@ -20,8 +20,17 @@ const TABS: Array<{ id: string; label: string; type?: KnowledgeBaseEntryType }> 
   { id: "documents", label: "Documents", type: "document" },
   { id: "insights", label: "Insights", type: "insight" },
   { id: "research", label: "Research", type: "research" },
-  { id: "ai", label: "AI Outputs", type: "ai_output" },
+  { id: "repositories", label: "Repositories", type: "repo" },
 ];
+
+const TYPE_LABELS: Record<KnowledgeBaseEntryType, string> = {
+  document: "Document",
+  insight: "Insight",
+  research: "Research",
+  repo: "Repository",
+  prd: "PRD",
+  ai_output: "AI Output",
+};
 
 interface KnowledgeBasePanelProps {
   workspaceId: string | null;
@@ -29,6 +38,8 @@ interface KnowledgeBasePanelProps {
   userId: string | null;
   projectOptions?: Array<{ id: string; label: string }>;
 }
+
+type ToastState = { type: "success" | "error"; message: string } | null;
 
 export default function KnowledgeBasePanel({
   workspaceId,
@@ -39,13 +50,32 @@ export default function KnowledgeBasePanel({
   const [entries, setEntries] = useState<KnowledgeBaseEntry[]>([]);
   const [activeTab, setActiveTab] = useState(TABS[0].id);
   const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [usingSemanticSearch, setUsingSemanticSearch] = useState(false);
+  const [feedback, setFeedback] = useState<ToastState>(null);
   const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
 
-  const selectedType = useMemo(() => TABS.find((tab) => tab.id === activeTab)?.type, [activeTab]);
+  const selectedType = useMemo(
+    () => TABS.find((tab) => tab.id === activeTab)?.type,
+    [activeTab]
+  );
+
+  const availableTags = useMemo(() => {
+    const collected = new Set<string>();
+    entries.forEach((entry) => {
+      entry.tags?.forEach((tag) => collected.add(tag));
+    });
+    return Array.from(collected).sort();
+  }, [entries]);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => setFeedback(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
 
   const loadEntries = useCallback(async () => {
     if (!workspaceId) {
@@ -56,39 +86,50 @@ export default function KnowledgeBasePanel({
     setError(null);
     try {
       const trimmedSearch = search.trim();
-      const useSemantic = trimmedSearch.length >= 3;
-      if (useSemantic) {
-        const results = await searchKnowledgeBase(workspaceId, trimmedSearch, selectedType, userId ?? undefined);
+      const canUseSemantic = trimmedSearch.length >= 3 && !tagFilter;
+      if (canUseSemantic) {
+        const results = await searchKnowledgeBase(
+          workspaceId,
+          trimmedSearch,
+          selectedType,
+          userId ?? undefined
+        );
         const normalized: KnowledgeBaseEntry[] = results.map((result: KnowledgeSearchResult) => ({
           id: result.id,
           kb_id: workspaceId,
           type: result.type,
-          title: result.title || result.filename || "Untitled entry",
+          title: result.title || "Untitled entry",
           content: result.content || "",
           file_url: null,
           source_url: null,
           created_by: null,
+          created_by_email: null,
           project_id: result.project_id ?? null,
-          tags: [],
+          tags: result.tags ?? [],
           created_at: result.uploaded_at,
           updated_at: result.uploaded_at,
         }));
         setEntries(normalized);
+        setUsingSemanticSearch(true);
       } else {
         const list = await listKnowledgeBaseEntries(
           workspaceId,
-          { type: selectedType, search: trimmedSearch || undefined },
+          {
+            type: selectedType,
+            search: trimmedSearch || undefined,
+            tag: tagFilter || undefined,
+          },
           userId ?? undefined
         );
         setEntries(list);
+        setUsingSemanticSearch(false);
       }
-      setUsingSemanticSearch(useSemantic);
     } catch (err: any) {
       setError(err.message || "Failed to load knowledge base entries.");
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, selectedType, search, userId]);
+  }, [workspaceId, selectedType, search, tagFilter, userId]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -96,12 +137,13 @@ export default function KnowledgeBasePanel({
       return;
     }
     loadEntries();
-  }, [workspaceId, selectedType, search, loadEntries]);
+  }, [workspaceId, selectedType, search, tagFilter, loadEntries]);
 
   const handleCreateText = async (payload: KnowledgeBaseEntryPayload) => {
     if (!workspaceId) return;
     await createKnowledgeBaseEntry(workspaceId, payload, userId ?? undefined);
     await loadEntries();
+    setFeedback({ type: "success", message: "Entry added to the workspace knowledge base." });
   };
 
   const handleUploadFile = async (
@@ -117,18 +159,29 @@ export default function KnowledgeBasePanel({
     if (payload.project_id) formData.append("project_id", payload.project_id);
     await uploadKnowledgeBaseEntry(workspaceId, formData, userId ?? undefined);
     await loadEntries();
+    setFeedback({ type: "success", message: "File uploaded to the knowledge base." });
   };
 
   const handleDelete = async (entryId: string) => {
-    if (!canEdit) return;
+    if (!canEdit || !workspaceId) return;
     const confirmed = window.confirm("Delete this knowledge base entry?");
     if (!confirmed) return;
-    if (!workspaceId) return;
     await deleteKnowledgeBaseEntry(workspaceId, entryId, userId ?? undefined);
     setEntries((prev) => prev.filter((entry) => entry.id !== entryId));
+    setFeedback({ type: "success", message: "Entry deleted." });
   };
 
-  const filteredEntries = useMemo(() => entries, [entries]);
+  const formatDate = (value: string) => {
+    try {
+      return new Date(value).toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch {
+      return value;
+    }
+  };
 
   if (!workspaceId) {
     return (
@@ -144,12 +197,12 @@ export default function KnowledgeBasePanel({
       <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-3xl font-bold">Knowledge Base</h2>
+            <h2 className="text-3xl font-bold text-slate-900">Knowledge Base</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Workspace-wide documents, research, and AI outputs for context.
+              Upload documents, insights, and research the AI can reason over.
             </p>
             {!canEdit && (
-              <p className="mt-2 text-xs text-amber-600">Viewer access cannot add or edit entries.</p>
+              <p className="mt-2 text-xs text-amber-600">Viewer access cannot upload or delete entries.</p>
             )}
           </div>
           {canEdit && (
@@ -157,108 +210,161 @@ export default function KnowledgeBasePanel({
               onClick={() => setShowModal(true)}
               className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
             >
-              Add entry
+              Upload entry
             </button>
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3 text-sm font-semibold">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`rounded-full px-4 py-1 transition ${
-                activeTab === tab.id
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-          <div className="ml-auto flex items-center">
+        {feedback && (
+          <div
+            className={`mb-4 rounded-2xl px-4 py-2 text-sm ${
+              feedback.type === "success"
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border border-rose-200 bg-rose-50 text-rose-700"
+            }`}
+          >
+            {feedback.message}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-center">
+          <div className="flex flex-wrap gap-2 text-sm font-semibold">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setTagFilter("");
+                }}
+                className={`rounded-full px-4 py-1 transition ${
+                  activeTab === tab.id
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-1 items-center gap-2">
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search entries..."
-              className="rounded-full border border-slate-200 px-4 py-1 text-sm"
+              placeholder="Search titles or tags…"
+              type="search"
+              className="w-full rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
           </div>
         </div>
+
+        {availableTags.length > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <span>Tags:</span>
+            <button
+              onClick={() => setTagFilter("")}
+              className={`rounded-full px-3 py-1 ${
+                tagFilter === "" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              All
+            </button>
+            {availableTags.map((tag) => (
+              <button
+                key={tag}
+                onClick={() => setTagFilter(tag)}
+                className={`rounded-full px-3 py-1 capitalize ${
+                  tagFilter === tag
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
+
         {usingSemanticSearch && search.trim().length >= 3 && (
           <p className="mt-2 text-xs text-slate-500">
-            Showing top matches for “{search.trim()}” via semantic search.
+            Showing the most relevant entries for “{search.trim()}” via semantic search.
           </p>
         )}
 
         {loading ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-            Loading entries...
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+            Loading entries…
           </div>
         ) : error ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error}</div>
-        ) : filteredEntries.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-            No entries yet.
+          <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">
+            {error}
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+            No entries match your filters. {canEdit ? "Upload a document to get started." : "Ask an editor to add context."}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  <th className="pb-3 pr-3">Title</th>
-                  <th className="pb-3 pr-3">Type</th>
-                  <th className="pb-3 pr-3">Tags</th>
-                  <th className="pb-3 pr-3">Updated</th>
-                  <th className="pb-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEntries.map((entry) => (
-                  <tr key={entry.id} className="border-t border-slate-100 text-slate-600">
-                    <td className="py-3 pr-3">
-                      <p className="font-semibold text-slate-900">{entry.title}</p>
-                      {entry.content && (
-                        <p className="text-xs text-slate-500">{entry.content.slice(0, 120)}{entry.content.length > 120 ? "..." : ""}</p>
-                      )}
-                    </td>
-                    <td className="py-3 pr-3">
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                        {entry.type}
+          <div className="mt-6 space-y-4">
+            {entries.map((entry) => (
+              <article
+                key={entry.id}
+                className="rounded-3xl border border-slate-100 bg-white/60 p-5 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)]"
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] uppercase tracking-wide">
+                        {TYPE_LABELS[entry.type] ?? entry.type}
                       </span>
-                    </td>
-                    <td className="py-3 pr-3 text-xs text-slate-500">
-                      {entry.tags.length > 0 ? entry.tags.join(", ") : "—"}
-                    </td>
-                    <td className="py-3 pr-3 text-xs text-slate-500">
-                      {new Date(entry.updated_at).toLocaleString()}
-                    </td>
-                    <td className="py-3 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        {entry.file_url && (
-                          <a
-                            href={knowledgeEntryDownloadUrl(workspaceId, entry.id, userId ?? undefined)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-sm font-semibold text-slate-600 hover:text-slate-900"
-                          >
-                            Download
-                          </a>
-                        )}
-                        {canEdit && (
+                      <span>{formatDate(entry.created_at)}</span>
+                    </div>
+                    <h3 className="mt-2 text-xl font-semibold text-slate-900">{entry.title}</h3>
+                    {entry.tags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {entry.tags.map((tag) => (
                           <button
-                            onClick={() => handleDelete(entry.id)}
-                            className="text-sm font-semibold text-rose-600 hover:text-rose-700"
+                            key={`${entry.id}-${tag}`}
+                            onClick={() => setTagFilter(tag)}
+                            className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700"
                           >
-                            Delete
+                            #{tag}
                           </button>
-                        )}
+                        ))}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    )}
+                    {entry.content && (
+                      <p className="mt-3 text-sm text-slate-600">
+                        {entry.content.length > 280 ? `${entry.content.slice(0, 280)}…` : entry.content}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    <p className="font-semibold text-slate-600">Uploaded by</p>
+                    <p className="text-slate-900">
+                      {entry.created_by_email || "Workspace collaborator"}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4 text-sm font-semibold text-slate-600">
+                  {entry.file_url && (
+                    <a
+                      href={knowledgeEntryDownloadUrl(workspaceId, entry.id, userId ?? undefined)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 hover:text-blue-700"
+                    >
+                      Download
+                    </a>
+                  )}
+                  {canEdit ? (
+                    <button onClick={() => handleDelete(entry.id)} className="text-rose-600 hover:text-rose-700">
+                      Delete
+                    </button>
+                  ) : (
+                    <span className="text-xs uppercase tracking-wide text-slate-400">Read-only</span>
+                  )}
+                </div>
+              </article>
+            ))}
           </div>
         )}
       </div>

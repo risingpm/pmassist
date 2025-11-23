@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from .database import get_db
 from . import models, schemas
 from backend.rbac import ensure_membership, normalize_role, validate_role_input, ROLE_ORDER
+from backend.knowledge_base_service import ensure_workspace_kb
 
 workspaces_router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 user_workspaces_router = APIRouter(prefix="/users", tags=["workspaces"])
@@ -122,6 +123,7 @@ def create_workspace_with_owner(
     db.add(membership)
     db.commit()
     db.refresh(workspace)
+    ensure_workspace_kb(db, workspace.id)
     return workspace
 
 
@@ -163,6 +165,7 @@ def create_workspace(payload: schemas.WorkspaceCreate, owner_id: UUID, db: Sessi
     db.add(membership)
     db.commit()
     db.refresh(workspace)
+    ensure_workspace_kb(db, workspace.id)
     return workspace
 
 

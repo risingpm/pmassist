@@ -105,6 +105,7 @@ def test_editor_can_create_project_entry(db_session):
         entry_type=None,
         search=None,
         limit=200,
+        tag=None,
         project_id=project.id,
         db=db_session,
     )
@@ -152,8 +153,36 @@ def test_project_filter_returns_matches(db_session):
         entry_type=None,
         search=None,
         limit=200,
+        tag=None,
         project_id=project_target.id,
         db=db_session,
     )
     assert len(filtered) == 1
     assert filtered[0].title == "Target Entry"
+
+
+def test_tag_filter_is_case_insensitive(db_session):
+    workspace, owner = create_workspace(db_session)
+    payload = KnowledgeBaseEntryCreate(
+        type="insight",
+        title="Tag Filter Entry",
+        content="tag search content",
+        tags=["LaunchReady", "Release"],
+    )
+    entry = create_text_entry(workspace.id, owner.id, payload, db=db_session)
+    assert "launchready" in entry.tags
+    assert "release" in entry.tags
+
+    viewer = add_member(db_session, workspace, role="viewer")
+    filtered = list_kb_entries(
+        workspace.id,
+        viewer.id,
+        entry_type=None,
+        search=None,
+        limit=200,
+        tag="Release",
+        project_id=None,
+        db=db_session,
+    )
+    assert len(filtered) == 1
+    assert filtered[0].title == "Tag Filter Entry"

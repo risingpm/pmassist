@@ -110,6 +110,7 @@ export type KnowledgeBaseEntry = {
   file_url?: string | null;
   source_url?: string | null;
   created_by?: string | null;
+  created_by_email?: string | null;
   project_id?: string | null;
   tags: string[];
   created_at: string;
@@ -118,12 +119,12 @@ export type KnowledgeBaseEntry = {
 
 export type KnowledgeSearchResult = {
   id: string;
-  filename?: string | null;
   content?: string | null;
   uploaded_at: string;
   title?: string | null;
   type: KnowledgeBaseEntryType;
   project_id?: string | null;
+  tags?: string[];
 };
 
 export type KnowledgeBaseEntryPayload = {
@@ -964,7 +965,13 @@ export async function getKnowledgeBase(workspaceId: string, userId?: string | nu
 
 export async function listKnowledgeBaseEntries(
   workspaceId: string,
-  filters: { type?: KnowledgeBaseEntryType; search?: string; limit?: number; projectId?: string } = {},
+  filters: {
+    type?: KnowledgeBaseEntryType;
+    search?: string;
+    limit?: number;
+    projectId?: string;
+    tag?: string;
+  } = {},
   userId?: string | null
 ): Promise<KnowledgeBaseEntry[]> {
   const extra: Record<string, string | undefined> = {};
@@ -972,6 +979,7 @@ export async function listKnowledgeBaseEntries(
   if (filters.search) extra.search = filters.search;
   if (filters.limit) extra.limit = String(filters.limit);
   if (filters.projectId) extra.project_id = filters.projectId;
+  if (filters.tag) extra.tag = filters.tag;
   const res = await fetch(workspaceUrl(`${API_BASE}/knowledge-base/workspaces/${workspaceId}/entries`, workspaceId, userId, extra));
   if (!res.ok) {
     const msg = await res.text();

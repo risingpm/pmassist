@@ -54,6 +54,7 @@ class Workspace(Base):
 
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
     projects = relationship("Project", back_populates="workspace", cascade="all, delete-orphan")
+    knowledge_base = relationship("KnowledgeBase", back_populates="workspace", cascade="all, delete-orphan", uselist=False)
 
 
 class WorkspaceMember(Base):
@@ -99,6 +100,42 @@ class WorkspaceInvitation(Base):
     workspace = relationship("Workspace")
 
 
+class KnowledgeBase(Base):
+    __tablename__ = "knowledge_bases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False, default="Workspace Knowledge Base")
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="knowledge_base")
+    entries = relationship("KnowledgeBaseEntry", back_populates="knowledge_base", cascade="all, delete-orphan")
+
+
+class KnowledgeBaseEntry(Base):
+    __tablename__ = "kb_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kb_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False)
+    type = Column(String, nullable=False, default="document")
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=True)
+    file_path = Column(String, nullable=True)
+    source_url = Column(String, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    tags = Column(ARRAY(String), default=list)
+    embedding = Column(Vector)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    knowledge_base = relationship("KnowledgeBase", back_populates="entries")
+    creator = relationship("User")
+    project = relationship("Project", back_populates="kb_entries")
+    documents = relationship("Document", back_populates="kb_entry", cascade="all, delete-orphan")
+
+
 # ✅ Project Model
 class Project(Base):
     __tablename__ = "projects"
@@ -124,6 +161,7 @@ class Project(Base):
     prototype_sessions = relationship("PrototypeSession", back_populates="project", cascade="all, delete-orphan")
     workspace = relationship("Workspace", back_populates="projects")
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
+    kb_entries = relationship("KnowledgeBaseEntry", back_populates="project")
 
 
 # ✅ Roadmap Model
@@ -185,16 +223,18 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     filename = Column(String, nullable=False)
     chunk_index = Column(String, nullable=False)
     content = Column(String, nullable=False)
     embedding = Column(Vector)  # pgvector column
     uploaded_at = Column(DateTime, server_default=func.now())
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    kb_entry_id = Column(UUID(as_uuid=True), ForeignKey("kb_entries.id", ondelete="CASCADE"), nullable=True)
 
     # Relationship
     project = relationship("Project", back_populates="documents")
+    kb_entry = relationship("KnowledgeBaseEntry", back_populates="documents")
 
 
 class UserAgent(Base):

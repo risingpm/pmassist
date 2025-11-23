@@ -20,6 +20,7 @@ from backend.knowledge_base_service import (
     delete_uploaded_file,
     ensure_workspace_kb,
     store_uploaded_file,
+    update_entry_embedding,
 )
 from backend.rbac import ensure_membership
 
@@ -39,6 +40,7 @@ def _serialize_entry(entry: models.KnowledgeBaseEntry) -> schemas.KnowledgeBaseE
         file_url=file_url,
         source_url=entry.source_url,
         created_by=entry.created_by,
+        created_by_email=entry.creator.email if entry.creator else None,
         project_id=entry.project_id,
         tags=entry.tags or [],
         created_at=entry.created_at,
@@ -46,12 +48,16 @@ def _serialize_entry(entry: models.KnowledgeBaseEntry) -> schemas.KnowledgeBaseE
     )
 
 
+def _normalize_tag_value(tag: str) -> str:
+    return tag.strip().lower()
+
+
 def _parse_tags(raw: Optional[str | list[str]]) -> list[str]:
     if raw is None:
         return []
     if isinstance(raw, list):
-        return [tag.strip() for tag in raw if tag]
-    return [tag.strip() for tag in raw.split(",") if tag.strip()]
+        return [_normalize_tag_value(tag) for tag in raw if tag and tag.strip()]
+    return [_normalize_tag_value(tag) for tag in raw.split(",") if tag.strip()]
 
 
 @router.get("/workspaces/{workspace_id}", response_model=schemas.KnowledgeBaseResponse)
@@ -77,6 +83,7 @@ def list_kb_entries(
     entry_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     limit: int = Query(200, le=500),
+    tag: Optional[str] = Query(None),
     project_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
 ):
@@ -84,7 +91,10 @@ def list_kb_entries(
     kb = ensure_workspace_kb(db, workspace_id)
     query = (
         db.query(models.KnowledgeBaseEntry)
-        .options(joinedload(models.KnowledgeBaseEntry.documents))
+        .options(
+            joinedload(models.KnowledgeBaseEntry.documents),
+            joinedload(models.KnowledgeBaseEntry.creator),
+        )
         .filter(models.KnowledgeBaseEntry.kb_id == kb.id)
         .order_by(models.KnowledgeBaseEntry.created_at.desc())
     )
@@ -92,12 +102,18 @@ def list_kb_entries(
         query = query.filter(models.KnowledgeBaseEntry.type == entry_type)
     if search:
         like_value = f"%{search.lower()}%"
+        tag_string = sa.func.lower(
+            sa.func.coalesce(sa.func.array_to_string(models.KnowledgeBaseEntry.tags, " "), "")
+        )
         query = query.filter(
             sa.or_(
                 sa.func.lower(models.KnowledgeBaseEntry.title).like(like_value),
                 sa.func.lower(models.KnowledgeBaseEntry.content).like(like_value),
+                tag_string.like(like_value),
             )
         )
+    if tag:
+        query = query.filter(models.KnowledgeBaseEntry.tags.contains([_normalize_tag_value(tag)]))
     if project_id:
         query = query.filter(models.KnowledgeBaseEntry.project_id == project_id)
     entries = query.limit(limit).all()
@@ -126,9 +142,11 @@ def create_text_entry(
         source_url=payload.source_url,
         created_by=user_id,
         project_id=payload.project_id,
-        tags=payload.tags or [],
+        tags=_parse_tags(payload.tags),
     )
     db.add(entry)
+    db.flush()
+    update_entry_embedding(db, entry, text_override=payload.content or entry.title)
     db.commit()
     db.refresh(entry)
     return _serialize_entry(entry)
@@ -188,6 +206,7 @@ async def upload_kb_entry(
         )
         db.add(doc)
 
+    update_entry_embedding(db, entry, text_override=extracted)
     db.commit()
     db.refresh(entry)
     return _serialize_entry(entry)
@@ -231,7 +250,9 @@ def update_entry(
     if payload.source_url is not None:
         entry.source_url = payload.source_url
     if payload.tags is not None:
-        entry.tags = payload.tags
+        entry.tags = _parse_tags(payload.tags)
+    if payload.content is not None or payload.title is not None:
+        update_entry_embedding(db, entry)
     db.add(entry)
     db.commit()
     db.refresh(entry)
@@ -272,3 +293,32 @@ def download_entry(entry_id: UUID, workspace_id: UUID, user_id: UUID, db: Sessio
     if not content:
         raise HTTPException(status_code=404, detail="Entry has no content to download")
     return PlainTextResponse(content, headers={"Content-Disposition": f"attachment; filename={entry.title or 'entry'}.txt"})
+
+
+@router.post("/{kb_id}/entries/{entry_id}/embed", response_model=schemas.KnowledgeBaseEntryResponse)
+def embed_entry(
+    kb_id: UUID,
+    entry_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    kb = (
+        db.query(models.KnowledgeBase)
+        .filter(models.KnowledgeBase.id == kb_id)
+        .first()
+    )
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    ensure_membership(db, kb.workspace_id, user_id, required_role="editor")
+    entry = (
+        db.query(models.KnowledgeBaseEntry)
+        .options(joinedload(models.KnowledgeBaseEntry.documents), joinedload(models.KnowledgeBaseEntry.creator))
+        .filter(models.KnowledgeBaseEntry.id == entry_id, models.KnowledgeBaseEntry.kb_id == kb.id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    update_entry_embedding(db, entry)
+    db.commit()
+    db.refresh(entry)
+    return _serialize_entry(entry)

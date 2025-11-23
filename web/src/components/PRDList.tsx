@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getPrds, createPrd, deletePrd, type ProjectRole, type KnowledgeBaseContextItem, type PRDRecord } from "../api";
+import ContextUsedPanel from "./ContextUsedPanel";
 
 type PRDListProps = {
   projectId: string;
@@ -176,21 +177,7 @@ export default function PRDList({
       {error && <p className="text-red-500">{error}</p>}
       {success && <p className="text-green-600">{success}</p>}
 
-      {contextEntries.length > 0 && (
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Context used
-          </p>
-          <ul className="mt-2 space-y-1 text-sm text-slate-600">
-            {contextEntries.map((entry) => (
-              <li key={entry.id}>
-                <span className="font-semibold text-slate-900">{entry.title}</span> · {entry.type}
-                <p className="text-xs text-slate-500">{entry.snippet}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <ContextUsedPanel entries={contextEntries} />
 
       {/* PRDs Table */}
       {prds.length === 0 ? (

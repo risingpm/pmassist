@@ -17,10 +17,10 @@ from openai import (
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import Project, Document, PRD, Roadmap, RoadmapConversation, UserAgent
-from backend.workspaces import get_project_in_workspace
-from backend import schemas
+from backend import models, schemas
+from backend.models import Project, Roadmap, RoadmapConversation, UserAgent
 from backend.rbac import ensure_project_access
+from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
 
 _openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
 _openai_org = os.getenv("OPENAI_ORG")
@@ -95,7 +95,7 @@ def build_agent_prompt(agent: UserAgent | None) -> str | None:
     )
 
 
-def build_context_block(project: Project, docs: list[Document], prds: list[PRD]) -> str:
+def build_context_block(project: Project, kb_entries: list[models.KnowledgeBaseEntry]) -> str:
     lines = [
         f"Project Title: {project.title}",
         f"Description: {project.description}",
@@ -103,20 +103,15 @@ def build_context_block(project: Project, docs: list[Document], prds: list[PRD])
         f"North Star Metric: {project.north_star_metric or 'Not specified'}",
         f"Target Personas: {', '.join(project.target_personas or []) or 'Not specified'}",
         "",
-        "Key Documents:",
+        "Knowledge Base Context:",
     ]
-    if docs:
-        for doc in docs[:10]:
-            preview = doc.content[:500]
-            lines.append(f"- {doc.filename}: {preview}")
+    if kb_entries:
+        for entry in kb_entries:
+            snippet = build_entry_content(entry, clip=600)
+            label = entry.type.upper()
+            lines.append(f"- {label}: {entry.title}\n{snippet}")
     else:
-        lines.append("- None uploaded")
-
-    if prds:
-        lines.append("\nExisting PRDs:")
-        for prd in prds[:5]:
-            content_preview = (prd.content or "")[:800]
-            lines.append(f"--- PRD ---\n{content_preview}")
+        lines.append("- No knowledge base entries yet")
     return "\n".join(lines)
 
 
@@ -163,6 +158,38 @@ def upsert_roadmap(db: Session, project: Project, content: str) -> Roadmap:
 router = APIRouter(prefix="/projects", tags=["roadmap"])
 
 
+def _context_items(entries: list[models.KnowledgeBaseEntry]) -> list[schemas.KnowledgeBaseContextItem]:
+    items: list[schemas.KnowledgeBaseContextItem] = []
+    for entry in entries:
+        snippet = build_entry_content(entry, clip=800) or entry.content or ""
+        items.append(
+            schemas.KnowledgeBaseContextItem(
+                id=entry.id,
+                title=entry.title,
+                type=entry.type,
+                snippet=snippet,
+            )
+        )
+    return items
+
+
+def _record_roadmap_entry(db: Session, workspace_id: UUID | None, project_id: UUID, user_id: UUID, content: str) -> None:
+    if not workspace_id:
+        return
+    kb = ensure_workspace_kb(db, workspace_id)
+    entry = models.KnowledgeBaseEntry(
+        kb_id=kb.id,
+        type="ai_output",
+        title="Roadmap Draft",
+        content=content,
+        created_by=user_id,
+        project_id=project_id,
+        tags=["roadmap"],
+    )
+    db.add(entry)
+    db.commit()
+
+
 @router.post("/{project_id}/roadmap/generate", response_model=schemas.RoadmapGenerateResponse)
 def generate_roadmap_endpoint(
     project_id: str,
@@ -177,24 +204,16 @@ def generate_roadmap_endpoint(
     ensure_project_access(db, payload.workspace_id, UUID(project_id), payload.user_id, required_role="contributor")
 
     project = get_project_in_workspace(db, project_id, payload.workspace_id)
-
-    docs = (
-        db.query(Document)
-        .filter(
-            Document.project_id == project_id,
-            Document.workspace_id.in_([project.workspace_id, None]),
-        )
-        .all()
-    )
-    prds = (
-        db.query(PRD)
-        .filter(
-            PRD.project_id == project_id,
-            PRD.workspace_id.in_([project.workspace_id, None]),
-        )
-        .all()
-    )
-    context_block = build_context_block(project, docs, prds)
+    query_terms = [
+        project.title,
+        project.description,
+        payload.prompt,
+    ]
+    query_terms.extend(msg.content for msg in history_messages if msg.role == "user")
+    context_query = "\n".join(filter(None, query_terms))
+    kb_entries = get_relevant_entries(db, project.workspace_id, context_query, limit=5)
+    context_items = _context_items(kb_entries)
+    context_block = build_context_block(project, kb_entries)
 
     history_messages = payload.conversation_history or []
     prompt = (payload.prompt or "").strip()
@@ -298,12 +317,16 @@ def generate_roadmap_endpoint(
 
     store_conversation(db, project_id, updated_history)
 
+    if action == "present_roadmap" and roadmap_markdown:
+        _record_roadmap_entry(db, project.workspace_id, UUID(project_id), payload.user_id, roadmap_markdown)
+
     return schemas.RoadmapGenerateResponse(
         message=assistant_message,
         conversation_history=updated_history,
         roadmap=roadmap_markdown,
         action=action,
         suggestions=suggestions,
+        context_entries=context_items,
     )
 
 
