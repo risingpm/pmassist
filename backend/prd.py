@@ -7,9 +7,8 @@ from . import models, schemas
 from .workspaces import get_project_in_workspace
 from backend.rbac import ensure_project_access
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
+from backend.ai_providers import get_openai_client
 
-from openai import OpenAI
-import os
 from fastapi.responses import FileResponse
 from docx import Document as DocxDocument
 import tempfile
@@ -17,13 +16,6 @@ from dotenv import load_dotenv
 
 # 🔑 Load environment variables
 load_dotenv()
-
-openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
-openai_org = os.getenv("OPENAI_ORG")
-if openai_org:
-    openai_kwargs["organization"] = openai_org
-# 🔑 OpenAI client
-client = OpenAI(**openai_kwargs)
 
 router = APIRouter(
     prefix="/projects",
@@ -126,6 +118,7 @@ Task: Generate a PRD for feature: {prd_data.feature_name}
 User instructions: {prd_data.prompt}
 """
 
+    client = get_openai_client(db, workspace_id)
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -233,6 +226,7 @@ def refine_prd(
     ]
 
     # Call OpenAI
+    client = get_openai_client(db, workspace_id)
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,

@@ -13,10 +13,10 @@ from textwrap import dedent
 from typing import Any
 
 import requests
-from openai import OpenAI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from backend.ai_providers import get_openai_client
 from backend.knowledge.embeddings import generate_embedding
 from backend.models import (
     Document,
@@ -60,12 +60,6 @@ CODE_EXTENSIONS = {
 
 MAX_FILE_BYTES = 200_000
 MAX_CONTENT_CHARS = 8_000
-
-openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
-openai_org = os.getenv("OPENAI_ORG")
-if openai_org:
-    openai_kwargs["organization"] = openai_org
-openai_client = OpenAI(**openai_kwargs)
 
 PRODUCT_USE_CASE_CATEGORIES = [
     "Project CRUD",
@@ -380,9 +374,14 @@ def _build_project_insight_prompt(
     return "\n\n".join(section.strip() for section in sections if section.strip())
 
 
-def _call_product_insight_model(prompt: str) -> dict[str, Any] | None:
+def _call_product_insight_model(db: Session, workspace_id: UUID | None, prompt: str) -> dict[str, Any] | None:
     try:
-        response = openai_client.chat.completions.create(
+        client = get_openai_client(db, workspace_id)
+    except Exception as exc:  # pragma: no cover - configuration issue
+        logger.warning("Unable to load OpenAI client for workspace %s: %s", workspace_id, exc)
+        return None
+    try:
+        response = client.chat.completions.create(
             model=os.getenv("OPENAI_INSIGHTS_MODEL", "gpt-4o"),
             messages=[
                 {"role": "system", "content": PRODUCT_INSIGHT_SYSTEM_PROMPT},
@@ -905,7 +904,7 @@ def sync_repository(
             if not summary:
                 continue
 
-            embedding = generate_embedding(summary)
+            embedding = generate_embedding(summary, db=db, workspace_id=connection.workspace_id)
 
             context_row = GitHubRepoContext(
                 repo_id=repo.id,
@@ -1001,7 +1000,13 @@ def generate_ai_insights(db: Session, repo: GitHubRepo) -> None:
             project=project,
         )
 
-        parsed = _call_product_insight_model(prompt)
+        workspace_uuid = None
+        if project and getattr(project, "workspace_id", None):
+            workspace_uuid = project.workspace_id
+        elif getattr(repo, "workspace_id", None):
+            workspace_uuid = repo.workspace_id
+
+        parsed = _call_product_insight_model(db, workspace_uuid, prompt)
         if parsed is None:
             continue
 
@@ -1039,7 +1044,9 @@ def generate_ai_insights(db: Session, repo: GitHubRepo) -> None:
         )
 
         for entry in knowledge_entries:
-            entry.embedding = generate_embedding(entry.content)
+            if entry.content:
+                workspace_uuid = getattr(entry, "workspace_id", None) or getattr(repo, "workspace_id", None)
+                entry.embedding = generate_embedding(entry.content, db=db, workspace_id=workspace_uuid)
             db.add(entry)
 
     db.commit()
@@ -1056,7 +1063,11 @@ def get_relevant_repo_context(
 ) -> list[dict[str, Any]]:
     if not workspace_id:
         return []
-    embedding = generate_embedding(query)
+    try:
+        workspace_uuid = UUID(str(workspace_id))
+    except (TypeError, ValueError):
+        return []
+    embedding = generate_embedding(query, db=db, workspace_id=workspace_uuid)
     rows = db.execute(
         text(
             """
@@ -1068,7 +1079,7 @@ def get_relevant_repo_context(
             LIMIT :limit
             """
         ),
-        {"workspace_id": str(workspace_id), "embedding": embedding, "limit": limit},
+        {"workspace_id": str(workspace_uuid), "embedding": embedding, "limit": limit},
     )
     return [dict(row) for row in rows]
 

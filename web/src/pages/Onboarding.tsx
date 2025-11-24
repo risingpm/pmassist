@@ -11,7 +11,14 @@ import {
   type UserAgentPayload,
   type AuthResponse,
 } from "../api";
-import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
+import {
+  AUTH_USER_KEY,
+  USER_ID_KEY,
+  WORKSPACE_ID_KEY,
+  WORKSPACE_NAME_KEY,
+  DEFAULT_AGENT_NAME,
+} from "../constants";
+import { setStoredAgentProfile } from "../utils/agentProfile";
 
 const NAME_SUGGESTIONS = ["Nova", "Atlas", "Lyra", "Astra", "Quill"];
 const FOCUS_OPTIONS = [
@@ -207,6 +214,7 @@ export default function OnboardingPage() {
     }
     setWorkspaceId(null);
     setWorkspaceName(null);
+    setStoredAgentProfile(null);
   };
 
   const [resolvedUserId, setResolvedUserId] = useState<string | null>(() => {
@@ -286,10 +294,12 @@ export default function OnboardingPage() {
             setAgentExists(true);
             setExistingAgent(agent);
             setShowExistingAgentPrompt(true);
+            setStoredAgentProfile({ name: agent.name || DEFAULT_AGENT_NAME });
           } else {
             setAgentExists(false);
             setExistingAgent(null);
             setShowExistingAgentPrompt(false);
+            setStoredAgentProfile(null);
           }
         }
       } catch (err: any) {
@@ -384,6 +394,7 @@ export default function OnboardingPage() {
             setAgentExists(true);
             setExistingAgent(agentCheck);
             setShowExistingAgentPrompt(true);
+            setStoredAgentProfile({ name: agentCheck.name || DEFAULT_AGENT_NAME });
           }
         } catch {
           // ignore failures when checking existing agent
@@ -402,6 +413,7 @@ export default function OnboardingPage() {
       setAgentExists(true);
       setExistingAgent(agent);
       setShowExistingAgentPrompt(false);
+      setStoredAgentProfile({ name: agent.name || DEFAULT_AGENT_NAME });
 
       const targetWorkspace = resultingWorkspaceId || window.sessionStorage.getItem(WORKSPACE_ID_KEY);
       const nextUrl = targetWorkspace ? `/dashboard?workspace=${targetWorkspace}` : "/dashboard";

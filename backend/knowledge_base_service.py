@@ -14,7 +14,7 @@ from backend.knowledge.embeddings import generate_embedding
 
 logger = logging.getLogger(__name__)
 
-KB_ENTRY_TYPES = {"document", "prd", "insight", "research", "repo", "ai_output", "roadmap"}
+KB_ENTRY_TYPES = {"document", "prd", "insight", "research", "repo", "ai_output", "roadmap", "prototype"}
 UPLOAD_ROOT = Path("backend/static/kb_uploads")
 EMBED_TEXT_LIMIT = 8000
 
@@ -82,6 +82,7 @@ def update_entry_embedding(
     db: Session,
     entry: models.KnowledgeBaseEntry,
     *,
+    workspace_id: UUID,
     text_override: str | None = None,
 ) -> None:
     text = _entry_text_source(entry, text_override)
@@ -90,7 +91,7 @@ def update_entry_embedding(
         return
     clipped = text[:EMBED_TEXT_LIMIT]
     try:
-        embedding = generate_embedding(clipped)
+        embedding = generate_embedding(clipped, db=db, workspace_id=workspace_id)
     except Exception as exc:  # pragma: no cover - relies on OpenAI
         logger.warning("Failed to generate embedding for KB entry %s: %s", entry.id, exc)
         return
@@ -105,7 +106,7 @@ def get_relevant_entries(db: Session, workspace_id: UUID, query: str, top_n: int
         return get_kb_context_entries(db, workspace_id, limit=top_n)
 
     try:
-        query_embedding = generate_embedding(normalized_query[:EMBED_TEXT_LIMIT])
+        query_embedding = generate_embedding(normalized_query[:EMBED_TEXT_LIMIT], db=db, workspace_id=workspace_id)
     except Exception as exc:  # pragma: no cover - relies on OpenAI
         logger.warning("Falling back to recency context for workspace %s: %s", workspace_id, exc)
         return get_kb_context_entries(db, workspace_id, limit=top_n)

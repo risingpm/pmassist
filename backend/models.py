@@ -57,6 +57,12 @@ class Workspace(Base):
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
     projects = relationship("Project", back_populates="workspace", cascade="all, delete-orphan")
     knowledge_base = relationship("KnowledgeBase", back_populates="workspace", cascade="all, delete-orphan", uselist=False)
+    ai_credentials = relationship(
+        "WorkspaceAICredential",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class WorkspaceMember(Base):
@@ -100,6 +106,37 @@ class WorkspaceInvitation(Base):
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
 
     workspace = relationship("Workspace")
+
+
+class WorkspaceAICredential(Base):
+    __tablename__ = "workspace_ai_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, unique=True)
+    provider = Column(String, nullable=False, default="openai")
+    api_key_encrypted = Column(Text, nullable=False)
+    organization = Column(String, nullable=True)
+    project = Column(String, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="ai_credentials")
+
+
+class TenantAICredential(Base):
+    __tablename__ = "tenant_ai_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider = Column(String, nullable=False, default="openai")
+    api_key_encrypted = Column(Text, nullable=False)
+    organization = Column(String, nullable=True)
+    project = Column(String, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class KnowledgeBase(Base):

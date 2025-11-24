@@ -2,15 +2,18 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
+import shutil
 from textwrap import dedent
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from openai import OpenAI, OpenAIError
+from openai import OpenAIError
 from sqlalchemy.orm import Session
 
 from backend import schemas
+from backend.ai_providers import get_openai_client
 from backend.database import get_db
 from backend.models import (
     Prototype,
@@ -24,8 +27,6 @@ from backend.models import (
     PRD,
 )
 from backend.workspaces import get_project_in_workspace
-from pathlib import Path
-import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -767,13 +768,19 @@ def fallback_spec(project, payload: schemas.PrototypeGenerateRequest) -> dict[st
     }
 
 
-def generate_spec_with_openai(messages: list[dict[str, str]]) -> dict[str, Any] | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+def generate_spec_with_openai(
+    messages: list[dict[str, str]],
+    *,
+    db: Session,
+    workspace_id: UUID | None,
+) -> dict[str, Any] | None:
+    try:
+        client = get_openai_client(db, workspace_id)
+    except Exception as exc:  # pragma: no cover - configuration issue
+        logger.warning("OpenAI client unavailable for prototype generation: %s", exc)
         return None
 
     try:
-        client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
@@ -842,12 +849,13 @@ def _generate_spec_for_variant(
     project: Project,
     roadmap: Roadmap,
     payload: schemas.PrototypeGenerateRequest,
+    db: Session,
     *,
     variant_index: int,
     total_variants: int,
 ) -> schemas.PrototypeSpec:
     messages = _build_generation_messages(project, roadmap, payload, variant_index=variant_index, total_variants=total_variants)
-    data = generate_spec_with_openai(messages) or fallback_spec(project, payload)
+    data = generate_spec_with_openai(messages, db=db, workspace_id=project.workspace_id) or fallback_spec(project, payload)
     spec = parse_spec(data)
 
     metadata = dict(spec.metadata or {})
@@ -936,7 +944,7 @@ def generate_prototype(
         raise HTTPException(status_code=400, detail="Use /batch endpoint when requesting multiple prototypes.")
 
     project, roadmap = _get_project_and_active_roadmap(db, project_id, payload.workspace_id)
-    spec = _generate_spec_for_variant(project, roadmap, payload, variant_index=0, total_variants=1)
+    spec = _generate_spec_for_variant(project, roadmap, payload, db, variant_index=0, total_variants=1)
     prototype = _persist_prototype(db, project=project, roadmap=roadmap, payload=payload, spec=spec)
     return prototype
 
@@ -953,7 +961,7 @@ def generate_prototype_batch(
     project, roadmap = _get_project_and_active_roadmap(db, project_id, payload.workspace_id)
     prototypes: list[Prototype] = []
     for index in range(total):
-        spec = _generate_spec_for_variant(project, roadmap, payload, variant_index=index, total_variants=total)
+        spec = _generate_spec_for_variant(project, roadmap, payload, db, variant_index=index, total_variants=total)
         prototype = _persist_prototype(db, project=project, roadmap=roadmap, payload=payload, spec=spec)
         prototypes.append(prototype)
     return prototypes

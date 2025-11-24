@@ -15,6 +15,7 @@ from . import knowledge_base
 from backend import roadmap_chat
 from backend import project_members
 from backend import builder
+from backend import dashboard
 from backend import tasks
 from backend import tasks_ai
 from backend.rbac import ensure_membership, ensure_project_access
@@ -212,6 +213,7 @@ app.include_router(agent.router)
 app.include_router(knowledge_base.router)
 app.include_router(roadmap_chat.router)
 app.include_router(builder.router)
+app.include_router(dashboard.router)
 app.include_router(tasks.workspace_router)
 app.include_router(tasks.task_router)
 app.include_router(tasks_ai.router)

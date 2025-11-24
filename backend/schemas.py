@@ -373,6 +373,88 @@ class WorkspaceInvitationAcceptRequest(BaseModel):
 
 
 # ---------------------------------------------------------
+# Workspace AI Provider
+# ---------------------------------------------------------
+
+class WorkspaceAIProviderStatus(BaseModel):
+    provider: Literal["openai"]
+    is_enabled: bool
+    updated_at: datetime | None = None
+    updated_by: UUID | None = None
+
+
+class WorkspaceAIProviderSave(BaseModel):
+    provider: Literal["openai"] = "openai"
+    api_key: str
+    organization: str | None = None
+    project: str | None = None
+    user_id: UUID
+
+
+class WorkspaceAIProviderTestRequest(BaseModel):
+    provider: Literal["openai"] = "openai"
+    api_key: str
+    organization: str | None = None
+    project: str | None = None
+    user_id: UUID
+
+
+class WorkspaceAIProviderTestResponse(BaseModel):
+    ok: bool = True
+
+
+# ---------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------
+
+class DashboardPRDItem(BaseModel):
+    id: UUID
+    title: str
+    status: str
+    updated_at: datetime
+
+
+class DashboardRoadmapSummary(BaseModel):
+    current_phase: str | None = None
+    completion_percent: float
+    total_tasks: int
+    done_tasks: int
+
+
+class DashboardTaskSummary(BaseModel):
+    total: int
+    todo: int
+    in_progress: int
+    done: int
+
+
+class DashboardSprintSummary(BaseModel):
+    velocity: float
+    completed_last_7_days: int
+    velocity_trend: list[float]
+    updated_at: datetime
+
+
+class DashboardOverviewResponse(BaseModel):
+    prds: list[DashboardPRDItem]
+    roadmap: DashboardRoadmapSummary
+    tasks: DashboardTaskSummary
+    sprint: DashboardSprintSummary
+    updated_at: datetime
+
+
+class DashboardCoachRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+
+
+class DashboardCoachResponse(BaseModel):
+    message: str
+    suggestions: list[str]
+    confidence: float
+
+
+# ---------------------------------------------------------
 # Knowledge Base
 # ---------------------------------------------------------
 

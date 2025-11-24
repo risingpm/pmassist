@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { GoogleLogin, GoogleOAuthProvider, type CredentialResponse } from "@react-oauth/google";
 
 import { loginWithGoogle, getUserAgent, getUserWorkspaces, type AuthResponse } from "../api";
-import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
+import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, DEFAULT_AGENT_NAME } from "../constants";
+import { setStoredAgentProfile } from "../utils/agentProfile";
 
 const extractErrorMessage = (value: unknown): string => {
   if (!value) return "Unable to sign in. Please try again.";
@@ -70,12 +71,15 @@ export default function SignInPage() {
     try {
       const agent = await getUserAgent(authResult.id);
       if (agent) {
+        setStoredAgentProfile({ name: agent.name || DEFAULT_AGENT_NAME });
         const target = workspaceId ? `/dashboard?workspace=${workspaceId}` : "/dashboard";
         navigate(target, { replace: true });
         return;
       }
+      setStoredAgentProfile(null);
     } catch (err) {
       console.warn("No agent found after sign in", err);
+      setStoredAgentProfile(null);
     }
 
     navigate("/onboarding", {

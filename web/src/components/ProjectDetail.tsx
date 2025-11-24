@@ -16,6 +16,8 @@ import GenerateTasksModal from "./tasks/GenerateTasksModal";
 import ChatWindow from "./ChatWindow";
 import ChatInput from "./ChatInput";
 import RoadmapPreviewCard from "./RoadmapPreview";
+import AgentAvatar from "./AgentAvatar";
+import useAgentName from "../hooks/useAgentName";
 import {
   getProject,
   fetchRoadmap as fetchSavedRoadmap,
@@ -283,6 +285,7 @@ export default function ProjectDetail({
     north_star_metric: "",
     target_personas: "",
   });
+  const agentName = useAgentName();
 
   useEffect(() => {
     const cached = projectRoles[projectId];
@@ -1496,7 +1499,10 @@ export default function ProjectDetail({
                   canEditProject ? "hover:bg-blue-700" : "cursor-not-allowed opacity-60"
                 }`}
               >
-                Open assistant
+                <span className="flex items-center gap-2">
+                  <AgentAvatar size="xs" className="shadow-none" />
+                  <span>Chat with {agentName}</span>
+                </span>
               </button>
             </div>
 
@@ -1559,7 +1565,7 @@ export default function ProjectDetail({
                 </div>
               ) : (
                 <p className="mt-4 text-sm text-slate-500">
-                  No roadmap saved yet. Start a conversation with the assistant.
+                  No roadmap saved yet. Start a conversation with {agentName} to draft one.
                 </p>
               )}
             </div>
@@ -1745,16 +1751,19 @@ export default function ProjectDetail({
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30">
           <div className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
             <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Roadmap assistant</h3>
-                <p className="text-xs text-slate-500">
-                  Co-create a roadmap for "{projectInfo?.title ?? "this project"}" in natural language.
-                </p>
-                {!canEditProject && (
-                  <p className="mt-1 text-xs text-amber-600">
-                    Viewer access: you can read history but not send prompts.
+              <div className="flex items-start gap-3">
+                <AgentAvatar size="sm" className="shadow-md" />
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">Chat with {agentName}</h3>
+                  <p className="text-xs text-slate-500">
+                    Co-create a roadmap for "{projectInfo?.title ?? "this project"}" in natural language.
                   </p>
-                )}
+                  {!canEditProject && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Viewer access: you can read history but not send prompts.
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="flex gap-2">
                 <button
