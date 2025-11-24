@@ -73,6 +73,10 @@ export type AuthPayload = {
   password: string;
 };
 
+export type GoogleAuthPayload = {
+  credential: string;
+};
+
 export type AuthResponse = {
   id: string;
   email: string;
@@ -134,6 +138,59 @@ export type KnowledgeBaseEntryPayload = {
   source_url?: string | null;
   project_id?: string | null;
   tags?: string[];
+};
+
+export type TaskStatus = "todo" | "in_progress" | "done";
+export type TaskPriority = "low" | "medium" | "high" | "critical";
+
+export type TaskRecord = {
+  id: string;
+  workspace_id: string;
+  project_id?: string | null;
+  epic_id?: string | null;
+  title: string;
+  description?: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee_id?: string | null;
+  due_date?: string | null;
+  roadmap_id?: string | null;
+  kb_entry_id?: string | null;
+  prd_id?: string | null;
+  ai_generated: boolean;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPayload = {
+  project_id?: string | null;
+  epic_id?: string | null;
+  title: string;
+  description?: string | null;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  assignee_id?: string | null;
+  due_date?: string | null;
+  roadmap_id?: string | null;
+  kb_entry_id?: string | null;
+  prd_id?: string | null;
+};
+
+export type TaskComment = {
+  id: string;
+  task_id: string;
+  author_id?: string | null;
+  content: string;
+  created_at: string;
+};
+
+export type TaskGenerationItem = {
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  effort?: string | null;
+  status: TaskStatus;
 };
 
 export type PRDRecord = {
@@ -352,6 +409,55 @@ export type GitHubProjectContext = {
   knowledge_entries: KnowledgeEntryRecord[];
 };
 
+export type RoadmapChatSession = {
+  id: string;
+  workspace_id: string;
+  project_id?: string | null;
+  user_id?: string | null;
+  messages: ChatMessage[];
+  output_entry_id?: string | null;
+  created_at: string;
+};
+
+export type RoadmapChatTurnResponse = RoadmapChatSession & {
+  assistant_message: string;
+  roadmap?: string | null;
+  context_entries?: KnowledgeBaseContextItem[] | null;
+  action: "ask_followup" | "present_roadmap";
+  suggestions?: string[] | null;
+  kb_entry_id?: string | null;
+};
+
+export type BuilderChatResponse = {
+  message: string;
+  code: string;
+  design_tokens: Record<string, any>;
+  context_entries?: KnowledgeBaseContextItem[] | null;
+  suggestions?: string[] | null;
+};
+
+export type BuilderPreviewResponse = {
+  preview_html: string;
+};
+
+export type BuilderPrototypeRecord = {
+  id: string;
+  workspace_id: string;
+  project_id?: string | null;
+  title: string;
+  prompt: string;
+  code: string;
+  preview_html?: string | null;
+  design_tokens?: Record<string, any> | null;
+  created_by?: string | null;
+  created_at: string;
+};
+
+export type TaskGenerationResponse = {
+  tasks: TaskGenerationItem[];
+  context_entries?: KnowledgeBaseContextItem[] | null;
+};
+
 export async function startGitHubAuth(workspaceId: string, userId: string, redirectOverride?: string) {
   const params = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
   if (redirectOverride) {
@@ -530,6 +636,199 @@ export async function generateRoadmapChat(
   return res.json();
 }
 
+export async function sendRoadmapChatTurn(payload: {
+  workspace_id: string;
+  project_id: string;
+  prompt: string;
+  chat_id?: string | null;
+  user_id?: string | null;
+}): Promise<RoadmapChatTurnResponse> {
+  const res = await fetch(`${API_BASE}/chat/roadmap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      user_id: payload.user_id ?? resolveUserId(),
+    }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to process roadmap chat");
+  }
+  return res.json();
+}
+
+export async function builderChat(payload: {
+  workspace_id: string;
+  user_id: string;
+  prompt: string;
+  project_id?: string | null;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+}): Promise<BuilderChatResponse> {
+  const res = await fetch(`${API_BASE}/builder/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      history: payload.history ?? [],
+    }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Builder chat failed");
+  }
+  return res.json();
+}
+
+export async function builderPreview(code: string): Promise<BuilderPreviewResponse> {
+  const res = await fetch(`${API_BASE}/builder/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Preview generation failed");
+  }
+  return res.json();
+}
+
+export async function builderSavePrototype(payload: {
+  workspace_id: string;
+  user_id: string;
+  title: string;
+  prompt: string;
+  code: string;
+  preview_html: string;
+  project_id?: string | null;
+  design_tokens?: Record<string, any>;
+}): Promise<BuilderPrototypeRecord> {
+  const res = await fetch(`${API_BASE}/builder/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to save prototype");
+  }
+  return res.json();
+}
+
+export async function listBuilderPrototypes(workspaceId: string, userId: string): Promise<BuilderPrototypeRecord[]> {
+  const res = await fetch(`${API_BASE}/builder/${workspaceId}/list?${new URLSearchParams({ user_id: userId }).toString()}`);
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load prototypes");
+  }
+  return res.json();
+}
+
+export async function listTasks(
+  workspaceId: string,
+  userId: string,
+  projectId?: string
+): Promise<TaskRecord[]> {
+  const params = buildWorkspaceQuery(workspaceId, userId, projectId ? { project_id: projectId } : undefined);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/tasks?${params}`);
+  if (!res.ok) throw new Error("Failed to load tasks");
+  return res.json();
+}
+
+export async function createTask(
+  workspaceId: string,
+  userId: string,
+  payload: TaskPayload
+): Promise<TaskRecord> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/tasks?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to create task");
+  }
+  return res.json();
+}
+
+export async function updateTask(
+  taskId: string,
+  workspaceId: string,
+  userId: string,
+  payload: Partial<TaskPayload>
+): Promise<TaskRecord> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/tasks/${taskId}?${params}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to update task");
+  }
+  return res.json();
+}
+
+export async function deleteTask(taskId: string, workspaceId: string, userId: string) {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/tasks/${taskId}?${params}`, { method: "DELETE" });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to delete task");
+  }
+}
+
+export async function listTaskComments(taskId: string, workspaceId: string, userId: string): Promise<TaskComment[]> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/tasks/${taskId}/comments?${params}`);
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load task comments");
+  }
+  return res.json();
+}
+
+export async function addTaskComment(
+  taskId: string,
+  workspaceId: string,
+  userId: string,
+  content: string
+): Promise<TaskComment> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/tasks/${taskId}/comments?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to add comment");
+  }
+  return res.json();
+}
+
+export async function generateTasksFromAI(payload: {
+  workspace_id: string;
+  project_id: string;
+  user_id: string;
+  prd_id?: string | null;
+  roadmap_id?: string | null;
+  instructions?: string | null;
+}): Promise<TaskGenerationResponse> {
+  const res = await fetch(`${API_BASE}/ai/generate-tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to generate tasks");
+  }
+  return res.json();
+}
 export async function updateRoadmap(projectId: string, workspaceId: string, content: string) {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId), {
     method: "PUT",
@@ -883,6 +1182,19 @@ export async function login(payload: AuthPayload): Promise<AuthResponse> {
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to sign in");
+  }
+  return res.json();
+}
+
+export async function loginWithGoogle(credential: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/google`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to sign in with Google");
   }
   return res.json();
 }

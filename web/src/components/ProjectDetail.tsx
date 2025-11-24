@@ -9,10 +9,16 @@ import ProjectPrototypeAgent from "./ProjectPrototypeAgent";
 import ProjectMembersPanel from "./ProjectMembersPanel";
 import UploadEntryModal from "./UploadEntryModal";
 import ContextUsedPanel from "./ContextUsedPanel";
+import KanbanBoard from "./tasks/KanbanBoard";
+import TaskForm from "./tasks/TaskForm";
+import TaskDetailDrawer from "./tasks/TaskDetailDrawer";
+import GenerateTasksModal from "./tasks/GenerateTasksModal";
+import ChatWindow from "./ChatWindow";
+import ChatInput from "./ChatInput";
+import RoadmapPreviewCard from "./RoadmapPreview";
 import {
   getProject,
   fetchRoadmap as fetchSavedRoadmap,
-  generateRoadmapChat,
   updateRoadmap,
   updateProject,
   getProjectComments,
@@ -30,6 +36,13 @@ import {
   getPrototypeSessions,
   createPrototypeSession,
   sendPrototypeAgentMessage,
+  listTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+  listTaskComments,
+  addTaskComment,
+  generateTasksFromAI,
   type ChatMessage,
   type ProjectComment,
   type ProjectRole,
@@ -42,16 +55,19 @@ import {
   type KnowledgeBaseEntryType,
   type KnowledgeBaseEntryPayload,
   type KnowledgeSearchResult,
+  type TaskRecord,
+  type TaskPayload,
+  type TaskComment,
+  type TaskGenerationItem,
   listKnowledgeBaseEntries,
   createKnowledgeBaseEntry,
   uploadKnowledgeBaseEntry,
   searchKnowledgeBase,
   knowledgeEntryDownloadUrl,
+  sendRoadmapChatTurn,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
 import { useUserRole } from "../context/RoleContext";
-
-const makeId = () => Math.random().toString(36).slice(2, 10);
 
 function formatRoadmapForDisplay(content: string): string {
   if (!content) return "";
@@ -116,12 +132,16 @@ type ProjectDetailProps = {
   onOpenKnowledgeBase?: () => void;
 };
 
-type ConversationEntry = ChatMessage & { id: string };
-
 type RoadmapPreview = {
   content: string;
   updated_at: string;
 };
+
+const ROADMAP_CHAT_PROMPTS = [
+  "Generate a three-phase roadmap for the next release.",
+  "Emphasize onboarding and activation metrics in Phase 1.",
+  "Add competitive benchmarking work to the next roadmap.",
+];
 
 export default function ProjectDetail({
   projectId,
@@ -168,8 +188,8 @@ export default function ProjectDetail({
     return "viewer";
   });
   const canEditProject = projectRole === "owner" || projectRole === "contributor";
-  const canManageProjectMembers = projectRole === "owner" || workspaceRole === "admin";
-  const canEditKnowledgeBase = workspaceRole === "admin" || workspaceRole === "editor";
+  const canManageTasks = workspaceRole === "admin" || workspaceRole === "editor";
+  const canEditKnowledgeBase = canManageTasks;
 
   const [projectInfo, setProjectInfo] = useState<{
     title: string;
@@ -179,7 +199,9 @@ export default function ProjectDetail({
     target_personas?: string[] | null;
   } | null>(null);
 
-  const [activeTab, setActiveTab] = useState<"knowledge" | "roadmap" | "prototypes" | "prd" | "members">(
+  const [activeTab, setActiveTab] = useState<
+    "knowledge" | "roadmap" | "prototypes" | "tasks" | "prd" | "members"
+  >(
     "knowledge"
   );
   const [knowledgeTab, setKnowledgeTab] = useState<
@@ -223,22 +245,34 @@ export default function ProjectDetail({
   const [loadingPrototypeSession, setLoadingPrototypeSession] = useState(false);
   const [prototypeSessionError, setPrototypeSessionError] = useState<string | null>(null);
   const [sendingPrototypeMessage, setSendingPrototypeMessage] = useState(false);
+  const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [taskFormOpen, setTaskFormOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskRecord | null>(null);
+  const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<TaskRecord | null>(null);
+  const [taskComments, setTaskComments] = useState<TaskComment[]>([]);
+  const [taskCommentsLoading, setTaskCommentsLoading] = useState(false);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+  const [generateTasksOpen, setGenerateTasksOpen] = useState(false);
+  const [generatingTasks, setGeneratingTasks] = useState(false);
+  const [taskDeleting, setTaskDeleting] = useState(false);
 
   // Roadmap interaction state
-  const [conversation, setConversation] = useState<ConversationEntry[]>([]);
-  const [promptInput, setPromptInput] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
   const [showAssistant, setShowAssistant] = useState(false);
-  const [roadmapContext, setRoadmapContext] = useState<KnowledgeBaseContextItem[]>([]);
+  const [roadmapChatId, setRoadmapChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatSuggestions, setChatSuggestions] = useState<string[]>([]);
+  const [chatContextEntries, setChatContextEntries] = useState<KnowledgeBaseContextItem[]>([]);
+  const [chatRoadmapContent, setChatRoadmapContent] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatLoading, setChatLoading] = useState(false);
 
   const [roadmapPreview, setRoadmapPreview] = useState<RoadmapPreview | null>(null);
   const [isEditingRoadmap, setIsEditingRoadmap] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [savingRoadmap, setSavingRoadmap] = useState(false);
-  const [isAssistantTyping, setIsAssistantTyping] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isEditingProject, setIsEditingProject] = useState(false);
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectSaveMessage, setProjectSaveMessage] = useState<string | null>(null);
@@ -275,11 +309,13 @@ export default function ProjectDetail({
       .catch((err) => console.warn("Failed to refresh project role", err));
   }, [projectId, workspaceId, userId, refreshProjectRole]);
 
-  const resetConversation = () => {
-    setConversation([]);
-    setPromptInput("");
-    setGenerateError(null);
-    setSuggestions([]);
+  const resetChatState = () => {
+    setRoadmapChatId(null);
+    setChatMessages([]);
+    setChatSuggestions([]);
+    setChatContextEntries([]);
+    setChatRoadmapContent(null);
+    setChatError(null);
   };
 
   useEffect(() => {
@@ -498,6 +534,20 @@ export default function ProjectDetail({
     }
   };
 
+  const loadTasks = useCallback(async () => {
+    if (!effectiveWorkspaceId || !userId) return;
+    setTasksLoading(true);
+    setTasksError(null);
+    try {
+      const list = await listTasks(effectiveWorkspaceId, userId, projectId);
+      setTasks(list);
+    } catch (err: any) {
+      setTasksError(err.message || "Failed to load tasks.");
+    } finally {
+      setTasksLoading(false);
+    }
+  }, [effectiveWorkspaceId, userId, projectId]);
+
   const handleGeneratePrototype = async ({ phase, focus, count }: { phase: string; focus: string; count: number }) => {
     if (!effectiveWorkspaceId) {
       throw new Error("Missing workspace context");
@@ -615,6 +665,135 @@ export default function ProjectDetail({
     }
   };
 
+  const handleSubmitTask = async (payload: TaskPayload) => {
+    if (!effectiveWorkspaceId || !userId) {
+      throw new Error("Workspace context missing.");
+    }
+    setTasksError(null);
+    const payloadWithProject: TaskPayload = {
+      ...payload,
+      project_id: payload.project_id ?? editingTask?.project_id ?? projectId,
+    };
+    try {
+      if (editingTask) {
+        await updateTask(editingTask.id, effectiveWorkspaceId, userId, payloadWithProject);
+      } else {
+        await createTask(effectiveWorkspaceId, userId, payloadWithProject);
+      }
+      await loadTasks();
+    } catch (err: any) {
+      setTasksError(err.message || "Failed to save task.");
+      throw err;
+    } finally {
+      setEditingTask(null);
+    }
+  };
+
+  const handleTaskStatusChange = async (taskId: string, status: "todo" | "in_progress" | "done") => {
+    if (!effectiveWorkspaceId || !userId || !canManageTasks) return;
+    try {
+      await updateTask(taskId, effectiveWorkspaceId, userId, { status });
+      setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, status } : task)));
+    } catch (err) {
+      console.warn("Failed to update task status", err);
+    }
+  };
+
+  const handleDeleteTask = async (task: TaskRecord) => {
+    if (!effectiveWorkspaceId || !userId || !canManageTasks) return;
+    setTaskDeleting(true);
+    try {
+      await deleteTask(task.id, effectiveWorkspaceId, userId);
+      setTaskDrawerOpen(false);
+      setSelectedTask(null);
+      await loadTasks();
+    } catch (err: any) {
+      setTasksError(err.message || "Failed to delete task.");
+    } finally {
+      setTaskDeleting(false);
+    }
+  };
+
+  const loadTaskComments = useCallback(
+    async (taskId: string) => {
+      if (!effectiveWorkspaceId || !userId) return;
+      setTaskCommentsLoading(true);
+      try {
+        const items = await listTaskComments(taskId, effectiveWorkspaceId, userId);
+        setTaskComments(items);
+      } catch (err) {
+        console.warn("Failed to load task comments", err);
+      } finally {
+        setTaskCommentsLoading(false);
+      }
+    },
+    [effectiveWorkspaceId, userId]
+  );
+
+  const handleAddTaskComment = async (content: string) => {
+    if (!selectedTask || !effectiveWorkspaceId || !userId) return;
+    setTaskCommentsLoading(true);
+    try {
+      await addTaskComment(selectedTask.id, effectiveWorkspaceId, userId, content);
+      await loadTaskComments(selectedTask.id);
+    } finally {
+      setTaskCommentsLoading(false);
+    }
+  };
+
+  const handleGenerateTasksRequest = async (instructions: string) => {
+    if (!effectiveWorkspaceId || !userId) {
+      throw new Error("Workspace context missing.");
+    }
+    setGeneratingTasks(true);
+    try {
+      const response = await generateTasksFromAI({
+        workspace_id: effectiveWorkspaceId,
+        project_id: projectId,
+        user_id: userId,
+        instructions,
+      });
+      return response.tasks;
+    } finally {
+      setGeneratingTasks(false);
+    }
+  };
+
+  const handleInsertGeneratedTasks = async (items: TaskGenerationItem[]) => {
+    if (!effectiveWorkspaceId || !userId) return;
+    for (const item of items) {
+      await createTask(effectiveWorkspaceId, userId, {
+        title: item.title,
+        description: item.description,
+        priority: item.priority,
+        status: item.status,
+        project_id: projectId,
+      });
+    }
+    await loadTasks();
+  };
+
+  const closeTaskForm = () => {
+    setTaskFormOpen(false);
+    setEditingTask(null);
+  };
+
+  const handleCloseTaskDrawer = () => {
+    setTaskDrawerOpen(false);
+    setSelectedTask(null);
+  };
+
+  const handleSelectTask = (task: TaskRecord) => {
+    setSelectedTask(task);
+    setTaskDrawerOpen(true);
+  };
+
+  const handleEditTask = (task: TaskRecord) => {
+    handleCloseTaskDrawer();
+    setEditingTask(task);
+    setTaskFormOpen(true);
+  };
+
   const knowledgeSummary = useMemo(() => {
     const latestComment = comments.length > 0 ? comments[0] : null;
     const latestLink = links.length > 0 ? links[0] : null;
@@ -637,6 +816,21 @@ export default function ProjectDetail({
     };
   }, [comments, links, prototypes, projectEntries]);
 
+  const taskSummary = useMemo(() => {
+    const summary = {
+      total: tasks.length,
+      todo: 0,
+      in_progress: 0,
+      done: 0,
+    };
+    tasks.forEach((task) => {
+      if (task.status in summary) {
+        summary[task.status as "todo" | "in_progress" | "done"] += 1;
+      }
+    });
+    return summary;
+  }, [tasks]);
+
   // ------------------- Roadmap handlers -------------------
   const loadRoadmap = async () => {
     if (!effectiveWorkspaceId) return;
@@ -648,117 +842,49 @@ export default function ProjectDetail({
     }
   };
 
-  const handleGenerateRoadmap = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRoadmapChatSend = async (prompt: string) => {
     if (!canEditProject) {
-      setGenerateError("You have read-only access to this workspace.");
+      setChatError("You have read-only access to this workspace.");
       return;
     }
-    const prompt = promptInput.trim();
-    if (!prompt) {
-      setGenerateError(
-        conversation.length === 0
-          ? "Describe what you need from the roadmap."
-          : "Please provide a reply before continuing."
-      );
+    if (!effectiveWorkspaceId || !userId) {
+      setChatError("Workspace context missing. Return to projects and re-open.");
       return;
     }
-
-    if (!effectiveWorkspaceId) {
-      setGenerateError("Workspace missing. Return to projects and re-open.");
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      setChatError("Describe what you need from the roadmap.");
       return;
     }
 
-    const userMessage: ConversationEntry = {
-      id: makeId(),
-      role: "user",
-      content: prompt,
-    };
-    setConversation((prev) => [...prev, userMessage]);
-    setPromptInput("");
-    setSuggestions([]);
-    setIsGenerating(true);
-    setIsAssistantTyping(true);
-    setGenerateError(null);
-
-    const historyPayload: ChatMessage[] = [...conversation, userMessage].map(
-      ({ role, content }) => ({ role, content })
-    );
-
+    setChatLoading(true);
+    setChatError(null);
     try {
-      if (!effectiveWorkspaceId) {
-        throw new Error("Workspace context missing");
-      }
-      const response = await generateRoadmapChat(
-        projectId,
-        "",
-        historyPayload,
-        userId ?? undefined,
-        effectiveWorkspaceId
-      );
-      setRoadmapContext(response.context_entries ?? []);
-
-      const mapped = response.conversation_history.map<ConversationEntry>((msg) => ({
-        ...msg,
-        id: makeId(),
-      }));
-
-      const assistantEntry = mapped[mapped.length - 1];
-      const prior = mapped.slice(0, -1);
-      setConversation(prior);
-
-      const animateAssistantMessage = (entry: ConversationEntry) => {
-        const full = entry.content;
-        const tempId = entry.id;
-        setConversation((prev) => [...prev, { ...entry, content: "" }]);
-
-        let index = 0;
-        const step = Math.max(1, Math.ceil(full.length / 40));
-        const timer = window.setInterval(() => {
-          index += step;
-          const nextSlice = full.slice(0, Math.min(index, full.length));
-          setConversation((prev) =>
-            prev.map((msg) =>
-              msg.id === tempId ? { ...msg, content: nextSlice } : msg
-            )
-          );
-          if (index >= full.length) {
-            clearInterval(timer);
-            setIsAssistantTyping(false);
-            setConversation((prev) =>
-              prev.map((msg) => (msg.id === tempId ? entry : msg))
-            );
-          }
-        }, 20);
-      };
-
-      if (assistantEntry) {
-        animateAssistantMessage(assistantEntry);
-      } else {
-        setIsAssistantTyping(false);
-      }
-
+      const response = await sendRoadmapChatTurn({
+        workspace_id: effectiveWorkspaceId,
+        project_id: projectId,
+        prompt: trimmed,
+        chat_id: roadmapChatId,
+        user_id: userId,
+      });
+      setRoadmapChatId(response.id);
+      setChatMessages(response.messages);
+      setChatSuggestions(response.suggestions ?? []);
+      setChatContextEntries(response.context_entries ?? []);
+      setChatRoadmapContent(response.roadmap ?? null);
       if (response.roadmap) {
         await loadRoadmap();
       }
-
-      if (response.action === "ask_followup") {
-        setSuggestions(response.suggestions ?? []);
-      } else {
-        setSuggestions([]);
-      }
     } catch (err: any) {
       console.error(err);
-      setGenerateError(err.message || "Failed to generate roadmap.");
-      setIsAssistantTyping(false);
-      setSuggestions([]);
+      setChatError(err.message || "Failed to generate roadmap.");
     } finally {
-      setIsGenerating(false);
+      setChatLoading(false);
     }
   };
 
   const handleStartNewConversation = () => {
-    resetConversation();
+    resetChatState();
   };
 
   const handleStartEditingRoadmap = () => {
@@ -817,7 +943,6 @@ export default function ProjectDetail({
   }, [projectId, effectiveWorkspaceId]);
 
   useEffect(() => {
-    fetchDocuments();
     loadComments();
     loadLinks();
     loadRoadmap();
@@ -829,6 +954,21 @@ export default function ProjectDetail({
       loadPrototypeSessions();
     }
   }, [activeTab, projectId, effectiveWorkspaceId]);
+
+  useEffect(() => {
+    if (activeTab === "tasks") {
+      loadTasks();
+    }
+  }, [activeTab, loadTasks]);
+
+  useEffect(() => {
+    if (taskDrawerOpen && selectedTask) {
+      loadTaskComments(selectedTask.id);
+    } else {
+      setTaskComments([]);
+      setTaskCommentsLoading(false);
+    }
+  }, [taskDrawerOpen, selectedTask, loadTaskComments]);
 
   // ------------------- Render -------------------
   if (!effectiveWorkspaceId) {
@@ -929,6 +1069,16 @@ export default function ProjectDetail({
             }
           >
             Prototypes
+          </button>
+          <button
+            onClick={() => setActiveTab("tasks")}
+            className={
+              activeTab === "tasks"
+                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
+                : "pb-2 hover:text-slate-700"
+            }
+          >
+            Tasks
           </button>
           <button
             onClick={() => setActiveTab("prd")}
@@ -1438,6 +1588,93 @@ export default function ProjectDetail({
           </section>
         )}
 
+        {activeTab === "tasks" && (
+          <section className="mt-6 space-y-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-2xl font-semibold text-slate-900">Project Tasks & Kanban</h2>
+                <p className="text-sm text-slate-500">
+                  Organize work tied to this project. Tasks stay synced with workspace RBAC.
+                </p>
+                {tasksError && <p className="mt-2 text-sm text-rose-600">{tasksError}</p>}
+                {!canManageTasks && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    Viewer access — drag and edit actions are disabled.
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={loadTasks}
+                  disabled={tasksLoading}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
+                >
+                  {tasksLoading ? "Refreshing…" : "Refresh"}
+                </button>
+                {canManageTasks && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setGenerateTasksOpen(true)}
+                      disabled={generatingTasks}
+                      className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      {generatingTasks ? "Gathering context…" : "Generate via AI"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingTask(null);
+                        setTaskFormOpen(true);
+                      }}
+                      className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                    >
+                      Add task
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-3xl border border-slate-100 bg-white p-4">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Total</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{taskSummary.total}</p>
+              </div>
+              <div className="rounded-3xl border border-slate-100 bg-white p-4">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">To Do</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{taskSummary.todo}</p>
+              </div>
+              <div className="rounded-3xl border border-slate-100 bg-white p-4">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">In Progress</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{taskSummary.in_progress}</p>
+              </div>
+              <div className="rounded-3xl border border-slate-100 bg-white p-4">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Done</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{taskSummary.done}</p>
+              </div>
+            </div>
+            {tasksLoading ? (
+              <div className="rounded-3xl border border-slate-100 bg-white p-6 text-sm text-slate-500">
+                Loading workspace tasks…
+              </div>
+            ) : tasks.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                No tasks yet. {canManageTasks ? "Use “Add task” or ask the AI to generate a plan." : "Ask an editor to create tasks for this project."}
+              </div>
+            ) : (
+              <div className="rounded-3xl border border-slate-100 bg-white p-4">
+                <KanbanBoard
+                  tasks={tasks}
+                  onStatusChange={handleTaskStatusChange}
+                  onSelectTask={handleSelectTask}
+                  canDrag={canManageTasks}
+                />
+              </div>
+            )}
+          </section>
+        )}
+
         {activeTab === "prd" && (
           <section className="mt-6">
             {!selectedPrd ? (
@@ -1477,124 +1714,87 @@ export default function ProjectDetail({
           </div>
         )}
       </div>
+      <TaskForm
+        open={taskFormOpen}
+        onClose={closeTaskForm}
+        onSubmit={handleSubmitTask}
+        initialTask={editingTask}
+      />
+      <TaskDetailDrawer
+        task={selectedTask}
+        comments={taskComments}
+        open={taskDrawerOpen}
+        onClose={handleCloseTaskDrawer}
+        onAddComment={handleAddTaskComment}
+        loading={taskCommentsLoading}
+        canEdit={canManageTasks}
+        onEdit={handleEditTask}
+        onDelete={handleDeleteTask}
+        deleting={taskDeleting}
+      />
+      <GenerateTasksModal
+        open={generateTasksOpen}
+        onClose={() => setGenerateTasksOpen(false)}
+        onGenerate={handleGenerateTasksRequest}
+        onConfirm={async (items) => {
+          await handleInsertGeneratedTasks(items);
+          setGenerateTasksOpen(false);
+        }}
+      />
       {showAssistant && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30">
-          <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+          <div className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Roadmap assistant</h3>
                 <p className="text-xs text-slate-500">
-                  Share your intent, answer follow-ups, and refine the roadmap instantly.
+                  Co-create a roadmap for "{projectInfo?.title ?? "this project"}" in natural language.
                 </p>
+                {!canEditProject && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    Viewer access: you can read history but not send prompts.
+                  </p>
+                )}
               </div>
-              <button
-                onClick={() => {
-                  setShowAssistant(false);
-                  setSuggestions([]);
-                }}
-                className="rounded-full bg-slate-200 px-3 py-1 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
-              >
-                Close
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleStartNewConversation}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                >
+                  New chat
+                </button>
+                <button
+                  onClick={() => setShowAssistant(false)}
+                  className="rounded-full bg-slate-200 px-3 py-1 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-              {!canEditProject && (
-                <p className="text-xs text-slate-500">
-                  You have viewer access. The assistant is available in read-only mode.
-                </p>
+            <div className="flex h-full flex-col">
+              <ChatWindow messages={chatMessages} isAssistantTyping={chatLoading} />
+              {chatError && (
+                <p className="px-6 text-sm text-rose-500">{chatError}</p>
               )}
-              {conversation.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  No messages yet. Provide a prompt to begin.
-                </p>
-              ) : (
-                <ul className="space-y-3">
-                  {conversation.map((msg) => (
-                    <li
-                      key={msg.id}
-                      className={
-                        msg.role === "user"
-                          ? "ml-auto max-w-[85%] rounded-2xl bg-blue-600 px-4 py-2 text-sm text-white"
-                          : "max-w-[90%] rounded-2xl bg-slate-100 px-4 py-2 text-sm text-slate-800"
-                      }
-                    >
-                      <span className="block whitespace-pre-wrap">{msg.content}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {isAssistantTyping && (
-                <div className="flex justify-start">
-                  <div className="max-w-[70%] rounded-2xl bg-slate-100 px-4 py-2 text-sm text-slate-500">
-                    Assistant is typing…
-                  </div>
-                </div>
-              )}
+              <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 space-y-4">
+                <ChatInput
+                  onSend={handleRoadmapChatSend}
+                  disabled={!canEditProject || chatLoading}
+                  suggestions={chatSuggestions.length > 0 ? chatSuggestions : ROADMAP_CHAT_PROMPTS}
+                  placeholder={
+                    canEditProject
+                      ? "Describe the roadmap you need help with..."
+                      : "Viewer access cannot submit prompts."
+                  }
+                />
+                <RoadmapPreviewCard
+                  content={chatRoadmapContent}
+                  onViewFull={roadmapPreview ? () => setActiveTab("roadmap") : undefined}
+                />
+                <ContextUsedPanel entries={chatContextEntries} />
+              </div>
             </div>
-            {roadmapContext.length > 0 && (
-              <div className="border-t border-slate-200 px-6 py-3">
-                <ContextUsedPanel entries={roadmapContext} />
-              </div>
-            )}
-
-            {generateError && (
-              <p className="px-6 text-sm text-rose-500">{generateError}</p>
-            )}
-
-            <form onSubmit={handleGenerateRoadmap} className="border-t border-slate-200 px-6 py-4 space-y-3">
-              <textarea
-                value={promptInput}
-                onChange={(e) => setPromptInput(e.target.value)}
-                placeholder={
-                  conversation.length === 0
-                    ? "Describe the initiative or strategic question you want the roadmap to cover"
-                    : "Reply to the assistant..."
-                }
-                rows={3}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                disabled={isGenerating || !canEditProject}
-              />
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>
-                  Conversation length: {conversation.length} message{conversation.length === 1 ? "" : "s"}
-                </span>
-                <div className="flex items-center gap-2">
-                  {conversation.length > 0 && !isGenerating && (
-                    <button
-                      type="button"
-                      onClick={handleStartNewConversation}
-                      disabled={!canEditProject}
-                      className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300 disabled:opacity-60"
-                    >
-                      Reset
-                    </button>
-                  )}
-                  <button
-                    type="submit"
-                    className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-                    disabled={isGenerating || !canEditProject}
-                  >
-                    {isGenerating ? "Thinking..." : "Send"}
-                  </button>
-                </div>
-              </div>
-              {suggestions.length > 0 && (
-                <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3 text-xs">
-                  {suggestions.map((chip) => (
-                    <button
-                      key={chip}
-                      type="button"
-                      onClick={() => canEditProject && setPromptInput(chip)}
-                      disabled={!canEditProject}
-                      className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-60"
-                    >
-                      {chip}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </form>
           </div>
         </div>
       )}

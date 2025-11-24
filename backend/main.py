@@ -12,7 +12,11 @@ from .models import Project
 from . import prd, agent, auth, models
 from .workspaces import workspaces_router, user_workspaces_router
 from . import knowledge_base
+from backend import roadmap_chat
 from backend import project_members
+from backend import builder
+from backend import tasks
+from backend import tasks_ai
 from backend.rbac import ensure_membership, ensure_project_access
 
 # Create tables if they don’t already exist
@@ -206,6 +210,11 @@ app.include_router(prototype_agent.router)
 app.include_router(prd.router)
 app.include_router(agent.router)
 app.include_router(knowledge_base.router)
+app.include_router(roadmap_chat.router)
+app.include_router(builder.router)
+app.include_router(tasks.workspace_router)
+app.include_router(tasks.task_router)
+app.include_router(tasks_ai.router)
 app.include_router(project_members.router)
 app.include_router(workspaces_router)
 app.include_router(user_workspaces_router)

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { GoogleLogin, GoogleOAuthProvider, type CredentialResponse } from "@react-oauth/google";
 
-import { login, getUserAgent, getUserWorkspaces } from "../api";
+import { loginWithGoogle, getUserAgent, getUserWorkspaces, type AuthResponse } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
 
 const extractErrorMessage = (value: unknown): string => {
@@ -36,68 +37,76 @@ const extractErrorMessage = (value: unknown): string => {
 
 export default function SignInPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setIsSubmitting(true);
-    setError(null);
+  const persistSession = (authResult: AuthResponse, workspaceId: string | null, workspaceName: string | null) => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(authResult));
+      window.sessionStorage.setItem(USER_ID_KEY, authResult.id);
+      if (workspaceId) window.sessionStorage.setItem(WORKSPACE_ID_KEY, workspaceId);
+      if (workspaceName) window.sessionStorage.setItem(WORKSPACE_NAME_KEY, workspaceName);
+    }
+  };
 
-    try {
-      const trimmedEmail = email.trim().toLowerCase();
-      if (!trimmedEmail || !password.trim()) {
-        setError("Enter your email and password to continue.");
-        setIsSubmitting(false);
-        return;
-      }
-
-      const authResult = await login({ email: trimmedEmail, password });
-
-      let workspaceId = authResult.workspace_id ?? null;
-      let workspaceName = authResult.workspace_name ?? null;
-      if (!workspaceId) {
-        try {
-          const list = await getUserWorkspaces(authResult.id);
-          if (list.length > 0) {
-            workspaceId = list[0].id;
-            workspaceName = list[0].name;
-          }
-        } catch (err) {
-          console.warn("Failed to load workspaces after login", err);
-        }
-      }
-
-      if (typeof window !== "undefined") {
-        window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(authResult));
-        window.sessionStorage.setItem(USER_ID_KEY, authResult.id);
-        if (workspaceId) window.sessionStorage.setItem(WORKSPACE_ID_KEY, workspaceId);
-        if (workspaceName) window.sessionStorage.setItem(WORKSPACE_NAME_KEY, workspaceName);
-      }
-
+  const completeSignIn = async (authResult: AuthResponse) => {
+    let workspaceId = authResult.workspace_id ?? null;
+    let workspaceName = authResult.workspace_name ?? null;
+    if (!workspaceId) {
       try {
-        const agent = await getUserAgent(authResult.id);
-        if (agent) {
-          const target = workspaceId ? `/dashboard?workspace=${workspaceId}` : "/dashboard";
-          navigate(target, { replace: true });
-          return;
+        const list = await getUserWorkspaces(authResult.id);
+        if (list.length > 0) {
+          workspaceId = list[0].id;
+          workspaceName = list[0].name;
         }
       } catch (err) {
-        console.warn("No agent found after sign in", err);
+        console.warn("Failed to load workspaces after Google sign-in", err);
       }
+    }
 
-      navigate("/onboarding", {
-        replace: true,
-        state: { prefillEmail: authResult.email },
-      });
+    persistSession(authResult, workspaceId, workspaceName);
+
+    try {
+      const agent = await getUserAgent(authResult.id);
+      if (agent) {
+        const target = workspaceId ? `/dashboard?workspace=${workspaceId}` : "/dashboard";
+        navigate(target, { replace: true });
+        return;
+      }
     } catch (err) {
-      console.error("Sign in failed", err);
+      console.warn("No agent found after sign in", err);
+    }
+
+    navigate("/onboarding", {
+      replace: true,
+    });
+  };
+
+  const handleGoogleCredential = async (credential: string) => {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const authResult = await loginWithGoogle(credential);
+      await completeSignIn(authResult);
+    } catch (err) {
+      console.error("Google sign in failed", err);
       setError(extractErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleGoogleSuccess = async (response: CredentialResponse) => {
+    if (!response.credential) {
+      setError("Google did not return a credential. Please try again.");
+      return;
+    }
+    await handleGoogleCredential(response.credential);
+  };
+
+  const handleGoogleError = () => {
+    setError("Unable to sign in with Google. Please try again.");
   };
 
   return (
@@ -111,63 +120,40 @@ export default function SignInPage() {
           </p>
         </header>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <label className="block text-sm font-medium text-slate-600">
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@company.com"
-              className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
-          </label>
-
-          <label className="block text-sm font-medium text-slate-600">
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Your password"
-              className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
-          </label>
-
+        <div className="space-y-6">
           {error && (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
               {error}
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="inline-flex w-full items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSubmitting ? "Signing in..." : "Sign In"}
-          </button>
-        </form>
+          {googleClientId ? (
+            <GoogleOAuthProvider clientId={googleClientId}>
+              <div className="flex justify-center">
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={handleGoogleError}
+                  useOneTap
+                  theme="filled_black"
+                  text="signin_with"
+                />
+              </div>
+            </GoogleOAuthProvider>
+          ) : (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              Google sign-in is not configured. Set <code>VITE_GOOGLE_CLIENT_ID</code> in your environment.
+            </div>
+          )}
 
-        <footer className="text-center text-sm text-slate-500">
-          New to PM Assist?{' '}
           <button
             type="button"
             onClick={() => navigate("/onboarding", { replace: true })}
-            className="font-semibold text-blue-600 hover:text-blue-700"
+            className="mx-auto inline-flex items-center justify-center rounded-full border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+            disabled={isSubmitting}
           >
-            Start onboarding
+            {isSubmitting ? "Signing in..." : "Back to onboarding"}
           </button>
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={() => navigate("/forgot-password", { replace: true })}
-              className="text-sm font-semibold text-slate-400 hover:text-blue-400"
-            >
-              Forgot password?
-            </button>
-          </div>
-        </footer>
+        </div>
       </div>
     </div>
   );

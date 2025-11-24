@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
 import OnboardingPage from "./pages/Onboarding";
 import ProjectsPage from "./pages/ProjectsPage";
+import BuilderChatPage from "./pages/BuilderChat";
+import PrototypesPage from "./pages/Prototypes";
 import SignInPage from "./pages/SignIn";
 import ForgotPasswordPage from "./pages/ForgotPassword";
 import ResetPasswordPage from "./pages/ResetPassword";
@@ -48,6 +50,8 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/dashboard" element={<ProjectsPage />} />
+        <Route path="/builder" element={<BuilderChatPage />} />
+        <Route path="/prototypes" element={<PrototypesPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </RoleProvider>
