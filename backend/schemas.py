@@ -81,6 +81,172 @@ class RoadmapGenerateResponse(BaseModel):
     action: str
     suggestions: list[str] | None = None
     context_entries: list["KnowledgeBaseContextItem"] | None = None
+    kb_entry_id: UUID | None = None
+
+
+class RoadmapChatTurnRequest(BaseModel):
+    workspace_id: UUID
+    project_id: UUID
+    user_id: UUID
+    prompt: str
+    chat_id: UUID | None = None
+
+
+class RoadmapChatRecord(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    project_id: UUID | None = None
+    user_id: UUID | None = None
+    messages: list[RoadmapChatMessage]
+    output_entry_id: UUID | None = None
+    created_at: datetime
+
+
+class RoadmapChatResponse(RoadmapChatRecord):
+    assistant_message: str
+    roadmap: str | None = None
+    context_entries: list["KnowledgeBaseContextItem"] | None = None
+    action: str
+    suggestions: list[str] | None = None
+    kb_entry_id: UUID | None = None
+
+
+class BuilderChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class BuilderChatRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    project_id: UUID | None = None
+    prompt: str
+    history: list[BuilderChatMessage] = Field(default_factory=list)
+
+
+class BuilderChatResponse(BaseModel):
+    message: str
+    code: str
+    design_tokens: dict[str, Any]
+    context_entries: list["KnowledgeBaseContextItem"] | None = None
+    suggestions: list[str] | None = None
+
+
+class BuilderPreviewRequest(BaseModel):
+    code: str
+
+
+class BuilderPreviewResponse(BaseModel):
+    preview_html: str
+
+
+class BuilderSaveRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    project_id: UUID | None = None
+    title: str
+    prompt: str
+    code: str
+    preview_html: str | None = None
+    design_tokens: dict[str, Any] | None = None
+
+
+class BuilderPrototypeResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    project_id: UUID | None = None
+    title: str
+    prompt: str
+    code: str
+    preview_html: str | None = None
+    design_tokens: dict[str, Any] | None = None
+    created_by: UUID | None = None
+    created_at: datetime
+
+
+TaskStatusLiteral = Literal["todo", "in_progress", "done"]
+TaskPriorityLiteral = Literal["low", "medium", "high", "critical"]
+
+
+class TaskBase(BaseModel):
+    project_id: UUID | None = None
+    epic_id: UUID | None = None
+    title: str
+    description: str | None = None
+    status: TaskStatusLiteral = "todo"
+    priority: TaskPriorityLiteral = "medium"
+    assignee_id: UUID | None = None
+    due_date: datetime | None = None
+    roadmap_id: UUID | None = None
+    kb_entry_id: UUID | None = None
+    prd_id: UUID | None = None
+
+
+class TaskCreate(TaskBase):
+    pass
+
+
+class TaskUpdate(BaseModel):
+    project_id: UUID | None = None
+    epic_id: UUID | None = None
+    title: str | None = None
+    description: str | None = None
+    status: TaskStatusLiteral | None = None
+    priority: TaskPriorityLiteral | None = None
+    assignee_id: UUID | None = None
+    due_date: datetime | None = None
+    roadmap_id: UUID | None = None
+    kb_entry_id: UUID | None = None
+    prd_id: UUID | None = None
+
+
+class TaskResponse(TaskBase):
+    id: UUID
+    workspace_id: UUID
+    ai_generated: bool
+    created_by: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TaskCommentCreate(BaseModel):
+    content: str
+
+
+class TaskCommentResponse(BaseModel):
+    id: UUID
+    task_id: UUID
+    author_id: UUID | None = None
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TaskGenerationItem(BaseModel):
+    title: str
+    description: str
+    priority: TaskPriorityLiteral = "medium"
+    effort: str | None = None
+    status: TaskStatusLiteral = "todo"
+
+
+class TaskGenerationRequest(BaseModel):
+    workspace_id: UUID
+    project_id: UUID
+    user_id: UUID
+    prd_id: UUID | None = None
+    roadmap_id: UUID | None = None
+    instructions: str | None = None
+
+
+class TaskGenerationResponse(BaseModel):
+    tasks: list[TaskGenerationItem]
+    context_entries: list["KnowledgeBaseContextItem"] | None = None
 
 
 class RoadmapUpdateRequest(BaseModel):
@@ -147,6 +313,10 @@ class AuthResponse(BaseModel):
     workspace_role: WorkspaceRoleLiteral | None = None
 
 
+class GoogleAuthRequest(BaseModel):
+    credential: str
+
+
 class WorkspaceResponse(BaseModel):
     id: UUID
     name: str
@@ -206,7 +376,16 @@ class WorkspaceInvitationAcceptRequest(BaseModel):
 # Knowledge Base
 # ---------------------------------------------------------
 
-KnowledgeBaseEntryType = Literal["document", "prd", "insight", "research", "repo", "ai_output"]
+KnowledgeBaseEntryType = Literal[
+    "document",
+    "prd",
+    "insight",
+    "research",
+    "repo",
+    "ai_output",
+    "roadmap",
+    "prototype",
+]
 
 
 class KnowledgeBaseResponse(BaseModel):

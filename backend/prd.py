@@ -93,7 +93,7 @@ def generate_prd(
             ],
         )
     )
-    kb_entries = get_relevant_entries(db, project.workspace_id, context_query, limit=5)
+    kb_entries = get_relevant_entries(db, project.workspace_id, context_query, top_n=5)
     context_items = _context_items(kb_entries)
     context_block = "\n\n".join(
         f"{item.title} ({item.type})\n{item.snippet}" for item in context_items
@@ -213,7 +213,7 @@ def refine_prd(
             ],
         )
     )
-    kb_entries = get_relevant_entries(db, project.workspace_id, refine_query, limit=5)
+    kb_entries = get_relevant_entries(db, project.workspace_id, refine_query, top_n=5)
     context_items = _context_items(kb_entries)
     context_block = "\n\n".join(
         f"{item.title} ({item.type})\n{item.snippet}" for item in context_items

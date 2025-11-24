@@ -43,14 +43,15 @@ def search_knowledge(
     entry_ids: list[UUID] = []
     try:
         query_embedding = generate_embedding(normalized_query[:EMBED_TEXT_LIMIT])
-        params["embedding"] = query_embedding
+        vector_literal = "[" + ",".join(f"{value:.10f}" for value in query_embedding) + "]"
+        params["embedding"] = vector_literal
         sql = (
             "SELECT id FROM kb_entries "
             "WHERE kb_id = :kb_id AND embedding IS NOT NULL"
         )
         if filters:
             sql += " AND " + " AND ".join(filters)
-        sql += " ORDER BY embedding <-> :embedding LIMIT :limit"
+        sql += " ORDER BY embedding <-> (:embedding)::vector LIMIT :limit"
         rows = db.execute(sa.text(sql), params).fetchall()
         entry_ids = [row[0] for row in rows]
     except Exception:

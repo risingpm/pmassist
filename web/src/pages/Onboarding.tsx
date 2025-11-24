@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { GoogleLogin, GoogleOAuthProvider, type CredentialResponse } from "@react-oauth/google";
 
 import {
   createUserAgent,
   getUserAgent,
   updateUserAgent,
-  signup,
-  login,
+  loginWithGoogle,
   type UserAgent,
   type UserAgentPayload,
+  type AuthResponse,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
 
@@ -96,7 +97,6 @@ const toApiPayload = (form: FormState): UserAgentPayload => ({
 export default function OnboardingPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const locationState = location.state as { prefillEmail?: string } | null;
 
   const [formState, setFormState] = useState<FormState>(DEFAULT_FORM_STATE);
   const [step, setStep] = useState<number>(0);
@@ -108,6 +108,8 @@ export default function OnboardingPage() {
   const [stepError, setStepError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
   const queryUserId = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -135,13 +137,6 @@ export default function OnboardingPage() {
   const [authProfile, setAuthProfile] = useState<{ id: string; email: string } | null>(
     initialAuthProfile
   );
-  const [authEmail, setAuthEmail] = useState(initialAuthProfile?.email ?? "");
-  const [authPassword, setAuthPassword] = useState("");
-  useEffect(() => {
-    if (locationState?.prefillEmail) {
-      setAuthEmail(locationState.prefillEmail);
-    }
-  }, [locationState]);
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -184,21 +179,49 @@ export default function OnboardingPage() {
     return "Something went wrong. Please try again.";
   };
 
+  const persistAuthSession = (authResult: AuthResponse) => {
+    setAuthProfile({ id: authResult.id, email: authResult.email });
+    setResolvedUserId(authResult.id);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(authResult));
+      window.sessionStorage.setItem(USER_ID_KEY, authResult.id);
+      if (authResult.workspace_id) {
+        window.sessionStorage.setItem(WORKSPACE_ID_KEY, authResult.workspace_id);
+        setWorkspaceId(authResult.workspace_id);
+      }
+      if (authResult.workspace_name) {
+        window.sessionStorage.setItem(WORKSPACE_NAME_KEY, authResult.workspace_name);
+        setWorkspaceName(authResult.workspace_name);
+      }
+    }
+  };
+
+  const clearAuthSession = () => {
+    setAuthProfile(null);
+    setResolvedUserId(null);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(AUTH_USER_KEY);
+      window.sessionStorage.removeItem(USER_ID_KEY);
+      window.sessionStorage.removeItem(WORKSPACE_ID_KEY);
+      window.sessionStorage.removeItem(WORKSPACE_NAME_KEY);
+    }
+    setWorkspaceId(null);
+    setWorkspaceName(null);
+  };
+
   const [resolvedUserId, setResolvedUserId] = useState<string | null>(() => {
     if (queryUserId) return queryUserId;
     if (initialAuthProfile?.id) return initialAuthProfile.id;
     return null;
   });
   const isAuthenticated = Boolean(resolvedUserId);
-  const signedInEmail = authProfile?.email ?? authEmail;
+  const signedInEmail = authProfile?.email ?? "";
 
   useEffect(() => {
     if (!queryUserId) {
       return;
     }
     setAuthProfile(null);
-    setAuthEmail("");
-    setAuthPassword("");
     setResolvedUserId(queryUserId);
     if (typeof window !== "undefined") {
       window.sessionStorage.removeItem(AUTH_USER_KEY);
@@ -215,6 +238,29 @@ export default function OnboardingPage() {
       window.sessionStorage.setItem(USER_ID_KEY, authProfile.id);
     }
   }, [authProfile]);
+
+  const handleGoogleCredential = async (credential: string) => {
+    setAuthError(null);
+    try {
+      const authResult = await loginWithGoogle(credential);
+      persistAuthSession(authResult);
+    } catch (err) {
+      console.error("Google sign-in failed during onboarding", err);
+      setAuthError(extractErrorMessage(err));
+    }
+  };
+
+  const handleGoogleSuccess = async (response: CredentialResponse) => {
+    if (!response.credential) {
+      setAuthError("Google did not return a credential. Please try again.");
+      return;
+    }
+    await handleGoogleCredential(response.credential);
+  };
+
+  const handleGoogleError = () => {
+    setAuthError("Unable to authenticate with Google. Please try again.");
+  };
 
   useEffect(() => {
     if (typeof window === "undefined" || !resolvedUserId) {
@@ -320,48 +366,17 @@ export default function OnboardingPage() {
     setSubmitError(null);
 
     let resultingWorkspaceId = workspaceId;
+    let activeUserId = resolvedUserId;
+    let currentAgentExists = agentExists;
+
+    if (!activeUserId) {
+      setSubmitError("Connect your Google account before saving this agent.");
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
-      let activeUserId = resolvedUserId;
-      let currentAgentExists = agentExists;
-
-      if (!activeUserId) {
-        const trimmedEmail = authEmail.trim().toLowerCase();
-        if (!trimmedEmail || !authPassword.trim()) {
-          setSubmitError("Enter your email and password to continue.");
-          setIsSubmitting(false);
-          return;
-        }
-
-        const creds = { email: trimmedEmail, password: authPassword };
-        const authResult = await signup(creds);
-
-        activeUserId = authResult.id;
-        setAuthProfile(authResult);
-        setResolvedUserId(authResult.id);
-        setAuthEmail(authResult.email);
-        setAuthPassword("");
-        const newWorkspaceId = authResult.workspace_id ?? null;
-        const newWorkspaceName = authResult.workspace_name ?? null;
-        if (typeof window !== "undefined") {
-          window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(authResult));
-          window.sessionStorage.setItem(USER_ID_KEY, authResult.id);
-          if (newWorkspaceId) window.sessionStorage.setItem(WORKSPACE_ID_KEY, newWorkspaceId);
-          if (newWorkspaceName) window.sessionStorage.setItem(WORKSPACE_NAME_KEY, newWorkspaceName);
-        }
-
-        if (newWorkspaceId) setWorkspaceId(newWorkspaceId);
-        if (newWorkspaceName) setWorkspaceName(newWorkspaceName);
-        if (newWorkspaceId) resultingWorkspaceId = newWorkspaceId;
-
-        const agentCheck = await getUserAgent(authResult.id);
-        currentAgentExists = Boolean(agentCheck);
-        setAgentExists(currentAgentExists);
-        if (agentCheck) {
-          setExistingAgent(agentCheck);
-          setShowExistingAgentPrompt(true);
-        }
-      } else if (!currentAgentExists) {
+      if (!currentAgentExists) {
         try {
           const agentCheck = await getUserAgent(activeUserId);
           if (agentCheck) {
@@ -394,36 +409,7 @@ export default function OnboardingPage() {
     } catch (err: any) {
       console.error("Failed to save agent", err);
       const message = extractErrorMessage(err);
-      if (message.toLowerCase().includes("already in use")) {
-        try {
-          const trimmedEmail = authEmail.trim().toLowerCase();
-          const creds = { email: trimmedEmail, password: authPassword };
-          const authResult = await login(creds);
-          setAuthProfile(authResult);
-          setResolvedUserId(authResult.id);
-          setAuthPassword("");
-          if (typeof window !== "undefined") {
-            window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(authResult));
-            window.sessionStorage.setItem(USER_ID_KEY, authResult.id);
-            if (authResult.workspace_id) {
-              window.sessionStorage.setItem(WORKSPACE_ID_KEY, authResult.workspace_id);
-              setWorkspaceId(authResult.workspace_id);
-              resultingWorkspaceId = authResult.workspace_id;
-            }
-            if (authResult.workspace_name) {
-              window.sessionStorage.setItem(WORKSPACE_NAME_KEY, authResult.workspace_name);
-              setWorkspaceName(authResult.workspace_name);
-            }
-          }
-          setSubmitError("Email already in use. Signed you in instead; please continue.");
-          return;
-        } catch (loginErr) {
-          console.error("Auto-signin after duplicate email failed", loginErr);
-          setSubmitError("Email already in use. Try signing in instead.");
-        }
-      } else {
-        setSubmitError(message);
-      }
+      setSubmitError(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -742,20 +728,26 @@ export default function OnboardingPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className="text-lg font-semibold text-slate-900">
-                      {isAuthenticated ? "You're signed in" : "Create your account"}
+                      {isAuthenticated ? "You're signed in" : "Connect your account"}
                     </h3>
                     <p className="mt-1 text-sm text-slate-500">
                       {isAuthenticated
                         ? "You're ready to save updates to this agent."
-                        : "Use your email and a password to save this agent for future sessions."}
+                        : "Use Google sign-in to save this agent for future sessions."}
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => navigate("/signin")}
+                    onClick={() => {
+                      if (isAuthenticated) {
+                        clearAuthSession();
+                      } else {
+                        navigate("/signin");
+                      }
+                    }}
                     className="text-xs font-semibold uppercase tracking-wide text-blue-500 hover:text-blue-600"
                   >
-                    {isAuthenticated ? "Switch account" : "I already have an account"}
+                    {isAuthenticated ? "Sign out" : "I already have an account"}
                   </button>
                 </div>
 
@@ -764,42 +756,35 @@ export default function OnboardingPage() {
                     Signed in as <span className="font-semibold text-slate-900">{signedInEmail}</span>
                   </div>
                 ) : (
-                  <>
-                    <label className="block text-sm font-medium text-slate-600">
-                      Email
-                      <input
-                        type="email"
-                        value={authEmail}
-                        onChange={(event) => {
-                          setAuthEmail(event.target.value);
-                          setStepError(null);
-                          setSubmitError(null);
-                        }}
-                        placeholder="you@company.com"
-                        className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                      />
-                    </label>
-
-                    <label className="block text-sm font-medium text-slate-600">
-                      Password
-                      <input
-                        type="password"
-                        value={authPassword}
-                        onChange={(event) => {
-                          setAuthPassword(event.target.value);
-                          setStepError(null);
-                          setSubmitError(null);
-                        }}
-                        minLength={8}
-                        placeholder="Minimum 8 characters"
-                        className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                      />
-                    </label>
-                  </>
+                  <div className="space-y-4">
+                    {authError && (
+                      <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+                        {authError}
+                      </div>
+                    )}
+                    {googleClientId ? (
+                      <GoogleOAuthProvider clientId={googleClientId}>
+                        <div className="flex justify-start">
+                          <GoogleLogin
+                            onSuccess={handleGoogleSuccess}
+                            onError={handleGoogleError}
+                            theme="filled_blue"
+                            text="continue_with"
+                            useOneTap
+                          />
+                        </div>
+                      </GoogleOAuthProvider>
+                    ) : (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                        Google sign-in is not configured. Set{" "}
+                        <code>VITE_GOOGLE_CLIENT_ID</code> to continue.
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-400">
+                      Connect Google to securely link this agent to your workspace.
+                    </p>
+                  </div>
                 )}
-                <p className="text-xs text-slate-400">
-                  Passwords are stored securely so you can return and keep iterating.
-                </p>
                 {existingAgent && !showExistingAgentPrompt && (
                   <button
                     type="button"

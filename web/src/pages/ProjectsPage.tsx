@@ -226,18 +226,6 @@ export default function ProjectsPage() {
     [applyWorkspaceContext, navigate, workspaceId]
   );
 
-  const formatDate = (value: string) => {
-    try {
-      return new Date(value).toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      });
-    } catch {
-      return value;
-    }
-  };
-
   const inviteWorkspaceCollaborator = useCallback(
     async (email: string, role: WorkspaceRole) => {
       if (!workspaceId || !userId) throw new Error("Missing workspace context");
@@ -601,6 +589,13 @@ export default function ProjectsPage() {
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                 Role: {workspaceRoleLabel}
               </span>
+              <button
+                type="button"
+                onClick={() => navigate("/builder")}
+                className="hidden rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 lg:inline-flex"
+              >
+                Prototype Builder
+              </button>
               <div className="md:hidden">
                 {workspaces.length > 0 && workspaceId && (
                   <select

@@ -21,6 +21,7 @@ from backend import models, schemas
 from backend.models import Project, Roadmap, RoadmapConversation, UserAgent
 from backend.rbac import ensure_project_access
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
+from backend.workspaces import get_project_in_workspace
 
 _openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
 _openai_org = os.getenv("OPENAI_ORG")
@@ -173,13 +174,13 @@ def _context_items(entries: list[models.KnowledgeBaseEntry]) -> list[schemas.Kno
     return items
 
 
-def _record_roadmap_entry(db: Session, workspace_id: UUID | None, project_id: UUID, user_id: UUID, content: str) -> None:
+def _record_roadmap_entry(db: Session, workspace_id: UUID | None, project_id: UUID, user_id: UUID, content: str) -> models.KnowledgeBaseEntry | None:
     if not workspace_id:
-        return
+        return None
     kb = ensure_workspace_kb(db, workspace_id)
     entry = models.KnowledgeBaseEntry(
         kb_id=kb.id,
-        type="ai_output",
+        type="roadmap",
         title="Roadmap Draft",
         content=content,
         created_by=user_id,
@@ -188,6 +189,8 @@ def _record_roadmap_entry(db: Session, workspace_id: UUID | None, project_id: UU
     )
     db.add(entry)
     db.commit()
+    db.refresh(entry)
+    return entry
 
 
 @router.post("/{project_id}/roadmap/generate", response_model=schemas.RoadmapGenerateResponse)
@@ -204,6 +207,7 @@ def generate_roadmap_endpoint(
     ensure_project_access(db, payload.workspace_id, UUID(project_id), payload.user_id, required_role="contributor")
 
     project = get_project_in_workspace(db, project_id, payload.workspace_id)
+    history_messages = payload.conversation_history or []
     query_terms = [
         project.title,
         project.description,
@@ -211,11 +215,10 @@ def generate_roadmap_endpoint(
     ]
     query_terms.extend(msg.content for msg in history_messages if msg.role == "user")
     context_query = "\n".join(filter(None, query_terms))
-    kb_entries = get_relevant_entries(db, project.workspace_id, context_query, limit=5)
+    kb_entries = get_relevant_entries(db, project.workspace_id, context_query, top_n=5)
     context_items = _context_items(kb_entries)
     context_block = build_context_block(project, kb_entries)
 
-    history_messages = payload.conversation_history or []
     prompt = (payload.prompt or "").strip()
     if not prompt and not history_messages:
         raise HTTPException(status_code=400, detail="Prompt is required to start the conversation.")
@@ -317,8 +320,11 @@ def generate_roadmap_endpoint(
 
     store_conversation(db, project_id, updated_history)
 
+    kb_entry_id = None
     if action == "present_roadmap" and roadmap_markdown:
-        _record_roadmap_entry(db, project.workspace_id, UUID(project_id), payload.user_id, roadmap_markdown)
+        entry = _record_roadmap_entry(db, project.workspace_id, UUID(project_id), payload.user_id, roadmap_markdown)
+        if entry:
+            kb_entry_id = entry.id
 
     return schemas.RoadmapGenerateResponse(
         message=assistant_message,
@@ -327,6 +333,7 @@ def generate_roadmap_endpoint(
         action=action,
         suggestions=suggestions,
         context_entries=context_items,
+        kb_entry_id=kb_entry_id,
     )
 
 

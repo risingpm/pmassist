@@ -14,7 +14,7 @@ from backend.knowledge.embeddings import generate_embedding
 
 logger = logging.getLogger(__name__)
 
-KB_ENTRY_TYPES = {"document", "prd", "insight", "research", "repo", "ai_output"}
+KB_ENTRY_TYPES = {"document", "prd", "insight", "research", "repo", "ai_output", "roadmap"}
 UPLOAD_ROOT = Path("backend/static/kb_uploads")
 EMBED_TEXT_LIMIT = 8000
 
@@ -110,13 +110,14 @@ def get_relevant_entries(db: Session, workspace_id: UUID, query: str, top_n: int
         logger.warning("Falling back to recency context for workspace %s: %s", workspace_id, exc)
         return get_kb_context_entries(db, workspace_id, limit=top_n)
 
+    vector_literal = "[" + ",".join(f"{value:.10f}" for value in query_embedding) + "]"
     rows = db.execute(
         sa.text(
             "SELECT id FROM kb_entries "
             "WHERE kb_id = :kb_id AND embedding IS NOT NULL "
-            "ORDER BY embedding <-> :embedding LIMIT :limit"
+            "ORDER BY embedding <-> (:embedding)::vector LIMIT :limit"
         ),
-        {"kb_id": str(kb.id), "embedding": query_embedding, "limit": top_n},
+        {"kb_id": str(kb.id), "embedding": vector_literal, "limit": top_n},
     ).fetchall()
 
     if not rows:
