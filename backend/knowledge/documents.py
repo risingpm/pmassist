@@ -153,7 +153,7 @@ def embed_documents(project_id: str, workspace_id: UUID, user_id: UUID, db: Sess
         return {"message": "No documents pending embedding."}
 
     for doc in docs:
-        doc.embedding = generate_embedding(doc.content)
+        doc.embedding = generate_embedding(doc.content, db=db, workspace_id=workspace_id)
         db.add(doc)
 
     db.commit()

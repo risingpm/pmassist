@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import ProjectDetail from "../components/ProjectDetail";
 import WorkspaceMembersPanel from "../components/WorkspaceMembersPanel";
@@ -218,7 +218,7 @@ export default function ProjectsPage() {
     (workspace: WorkspaceSummary, view: PanelView) => {
       if (workspace.id !== workspaceId) {
         applyWorkspaceContext(workspace, view);
-        navigate(`/dashboard?workspace=${workspace.id}`, { replace: true });
+        navigate(`/projects?workspace=${workspace.id}`, { replace: true });
       } else {
         setActiveView(view);
       }
@@ -307,7 +307,7 @@ export default function ProjectsPage() {
         setWorkspaces(list);
         if (!workspaceId && list.length > 0) {
           applyWorkspaceContext(list[0]);
-          navigate(`/dashboard?workspace=${list[0].id}`, { replace: true });
+          navigate(`/projects?workspace=${list[0].id}`, { replace: true });
           return;
         }
         if (workspaceId) {
@@ -418,7 +418,7 @@ export default function ProjectsPage() {
       setWorkspaceName(workspace.name);
       setWorkspaceRole("admin");
       setActiveView("projects");
-      navigate(`/dashboard?workspace=${workspace.id}`, { replace: true });
+        navigate(`/projects?workspace=${workspace.id}`, { replace: true });
     } catch (err) {
       console.error("Failed to create workspace", err);
       setErrorMessage("Failed to create workspace");
@@ -461,7 +461,7 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="flex min-h-screen">
         <aside className="hidden w-64 flex-shrink-0 flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-sm md:flex">
           <div className="flex items-center gap-3 pb-6">
@@ -489,6 +489,14 @@ export default function ProjectsPage() {
                     {ws.name}
                   </button>
                   <div className="ml-3 border-l border-slate-100 pl-3 text-xs">
+                    <button
+                      onClick={() => {
+                        navigate(`/dashboard?workspace=${ws.id}`);
+                      }}
+                      className="mb-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
+                    >
+                      Dashboard
+                    </button>
                     <button
                       onClick={() => handleWorkspaceNavigation(ws, "projects")}
                       className={`mb-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
@@ -530,6 +538,20 @@ export default function ProjectsPage() {
               </p>
             )}
           </nav>
+          {canAdminWorkspace && (
+            <div className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/60 px-4 py-4 text-xs">
+              <p className="font-semibold uppercase tracking-[0.3em] text-slate-400">Global</p>
+              <Link
+                to="/settings"
+                className="mt-3 block rounded-full bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-100"
+              >
+                AI Provider Settings
+              </Link>
+              <p className="mt-2 text-[11px] text-slate-400">
+                Configure the assistant&apos;s OpenAI key for every workspace.
+              </p>
+            </div>
+          )}
           <div className="mt-4 space-y-2">
             <button
               onClick={handleCreateWorkspace}
@@ -574,55 +596,54 @@ export default function ProjectsPage() {
         </aside>
 
         <main className="flex-1 px-4 py-6 md:px-10 md:py-10">
-          <header className="flex flex-col gap-4 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-2xl font-semibold text-slate-900">{workspaceName || "Workspace"}</h1>
-              <p className="text-sm text-slate-500">
-                {isProjectsView
-                  ? "Projects and artifacts scoped to this workspace."
-                  : isKnowledgeBaseView
-                  ? "Workspace knowledge base for documents, insights, and AI context."
-                  : "Workspace settings → Members. Manage roles and invitations."}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                Role: {workspaceRoleLabel}
-              </span>
-              <button
-                type="button"
-                onClick={() => navigate("/builder")}
-                className="hidden rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 lg:inline-flex"
+          <div className="rounded-3xl border border-slate-200 bg-white/80 px-6 py-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Workspace</p>
+            <h1 className="text-2xl font-semibold text-slate-900">{workspaceName || "Workspace"}</h1>
+            <p className="text-sm text-slate-500">
+              {isProjectsView
+                ? "Projects and artifacts scoped to this workspace."
+                : isKnowledgeBaseView
+                ? "Workspace knowledge base for documents, insights, and AI context."
+                : "Workspace settings → Members. Manage roles and invitations."}
+            </p>
+          </div>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              Role: {workspaceRoleLabel}
+            </span>
+            <button
+              type="button"
+              onClick={() => navigate("/builder")}
+              className="rounded-full border border-slate-200 px-4 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+            >
+              Prototype Builder
+            </button>
+          </div>
+          <div className="mt-3 md:hidden">
+            {workspaces.length > 0 && workspaceId && (
+              <select
+                value={workspaceId}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  const entry = workspaces.find((ws) => ws.id === nextId);
+                  if (entry) {
+                    handleWorkspaceNavigation(entry, "projects");
+                  } else {
+                    setWorkspaceId(nextId);
+                    setActiveView("projects");
+                    navigate(`/projects?workspace=${nextId}`, { replace: true });
+                  }
+                }}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600"
               >
-                Prototype Builder
-              </button>
-              <div className="md:hidden">
-                {workspaces.length > 0 && workspaceId && (
-                  <select
-                    value={workspaceId}
-                    onChange={(event) => {
-                      const nextId = event.target.value;
-                      const entry = workspaces.find((ws) => ws.id === nextId);
-                      if (entry) {
-                        handleWorkspaceNavigation(entry, "projects");
-                      } else {
-                        setWorkspaceId(nextId);
-                        setActiveView("projects");
-                        navigate(`/dashboard?workspace=${nextId}`, { replace: true });
-                      }
-                    }}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600"
-                  >
-                    {workspaces.map((ws) => (
-                      <option key={ws.id} value={ws.id}>
-                        {ws.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            </div>
-          </header>
+                {workspaces.map((ws) => (
+                  <option key={ws.id} value={ws.id}>
+                    {ws.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
 
           {isProjectsView && (successMessage || errorMessage) && (
             <div className="mt-6 space-y-2">
@@ -684,19 +705,49 @@ export default function ProjectsPage() {
                   {sortedProjects.map((project) => (
                     <article
                       key={project.id}
-                      className="flex h-full flex-col justify-between rounded-3xl border border-slate-100 bg-white p-6 shadow-[0_20px_40px_-24px_rgba(15,23,42,0.35)] transition hover:-translate-y-1 hover:shadow-[0_24px_50px_-24px_rgba(15,23,42,0.4)]"
+                      className="flex h-full flex-col rounded-3xl border border-slate-100 bg-white/80 p-6 shadow-[0_20px_40px_-24px_rgba(15,23,42,0.35)] transition hover:-translate-y-1 hover:shadow-[0_24px_50px_-24px_rgba(15,23,42,0.4)]"
                     >
-                      <div>
-                        <h3 className="text-xl font-semibold text-slate-900">{project.title}</h3>
-                        <p className="mt-3 text-sm leading-6 text-slate-500">{project.description}</p>
-                        <div className="mt-4 rounded-2xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-400">
-                          {project.goals}
+                      <header className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Initiative</p>
+                          <h3 className="text-xl font-semibold text-slate-900">{project.title}</h3>
                         </div>
                         {project.north_star_metric && (
-                          <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-blue-500">
-                            North Star: {project.north_star_metric}
-                          </div>
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600">
+                            {project.north_star_metric}
+                          </span>
                         )}
+                      </header>
+                      <p className="mt-3 text-sm leading-6 text-slate-500 line-clamp-3">
+                        {project.description}
+                      </p>
+                      <div className="mt-4 grid gap-4 text-xs text-slate-500 sm:grid-cols-2">
+                        <div>
+                          <p className="font-semibold uppercase tracking-wide text-slate-400">Goals</p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {project.goals || "Not specified"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-semibold uppercase tracking-wide text-slate-400">Personas</p>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {project.target_personas && project.target_personas.length > 0 ? (
+                              project.target_personas.map((persona) => (
+                                <span
+                                  key={`${project.id}-${persona}`}
+                                  className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                                >
+                                  {persona}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-sm text-slate-400">Not defined</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500">
+                        Keep this project aligned by linking PRDs, roadmaps, and task boards in one place.
                       </div>
                       <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 text-sm">
                         <button

@@ -5,31 +5,16 @@ from uuid import UUID
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
+from backend.ai_providers import get_openai_client
 from backend.database import get_db
 from backend.knowledge_base_service import get_relevant_entries, build_entry_content
 from backend.rbac import ensure_membership
 from backend.workspaces import get_project_in_workspace
 
 router = APIRouter(prefix="/ai", tags=["ai"])
-
-openai_kwargs = {}
-from dotenv import load_dotenv  # type: ignore
-import os
-
-load_dotenv()
-
-api_key = os.getenv("OPENAI_API_KEY")
-if api_key:
-    openai_kwargs["api_key"] = api_key
-openai_org = os.getenv("OPENAI_ORG")
-if openai_org:
-    openai_kwargs["organization"] = openai_org
-
-client = OpenAI(**openai_kwargs)
 
 
 def _serialize_context(entries: list[models.KnowledgeBaseEntry]) -> list[schemas.KnowledgeBaseContextItem]:
@@ -121,6 +106,7 @@ Relevant knowledge base context:
 """
 
     try:
+        client = get_openai_client(db, payload.workspace_id)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0.2,

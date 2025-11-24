@@ -9,6 +9,12 @@ from .database import get_db
 from . import models, schemas
 from backend.rbac import ensure_membership, normalize_role, validate_role_input, ROLE_ORDER
 from backend.knowledge_base_service import ensure_workspace_kb
+from backend.ai_providers import (
+    upsert_global_openai_credentials,
+    delete_global_openai_credentials,
+    get_global_openai_credential,
+    test_openai_credentials,
+)
 
 workspaces_router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 user_workspaces_router = APIRouter(prefix="/users", tags=["workspaces"])
@@ -63,6 +69,17 @@ def _pending_invites_query(db: Session, workspace_id: UUID):
             models.WorkspaceInvitation.accepted_at.is_(None),
             models.WorkspaceInvitation.cancelled_at.is_(None),
         )
+    )
+
+
+def _serialize_ai_provider_status(
+    record: models.TenantAICredential | None,
+) -> schemas.WorkspaceAIProviderStatus:
+    return schemas.WorkspaceAIProviderStatus(
+        provider="openai",
+        is_enabled=record is not None,
+        updated_at=record.updated_at if record else None,
+        updated_by=record.updated_by if record else None,
     )
 
 
@@ -286,6 +303,62 @@ def remove_workspace_member(workspace_id: UUID, member_id: UUID, user_id: UUID, 
         .delete(synchronize_session=False)
     )
     db.commit()
+
+
+@workspaces_router.get(
+    "/{workspace_id}/ai-provider",
+    response_model=schemas.WorkspaceAIProviderStatus,
+)
+def get_workspace_ai_provider(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    record = get_global_openai_credential(db)
+    return _serialize_ai_provider_status(record)
+
+
+@workspaces_router.post("/{workspace_id}/ai-provider/test")
+def test_workspace_ai_provider(
+    workspace_id: UUID,
+    payload: schemas.WorkspaceAIProviderTestRequest,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, workspace_id, payload.user_id, required_role="admin")
+    try:
+        test_openai_credentials(payload.api_key, organization=payload.organization, project=payload.project)
+    except Exception as exc:  # pragma: no cover - network call
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unable to verify OpenAI credentials: {exc}") from exc
+    return {"ok": True}
+
+
+@workspaces_router.post(
+    "/{workspace_id}/ai-provider",
+    response_model=schemas.WorkspaceAIProviderStatus,
+)
+def save_workspace_ai_provider(
+    workspace_id: UUID,
+    payload: schemas.WorkspaceAIProviderSave,
+    db: Session = Depends(get_db),
+):
+    if payload.provider != "openai":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported AI provider")
+    ensure_membership(db, workspace_id, payload.user_id, required_role="admin")
+    try:
+        test_openai_credentials(payload.api_key, organization=payload.organization, project=payload.project)
+    except Exception as exc:  # pragma: no cover - network call
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unable to verify OpenAI credentials: {exc}") from exc
+    record = upsert_global_openai_credentials(
+        db,
+        api_key=payload.api_key,
+        organization=payload.organization,
+        project=payload.project,
+        user_id=payload.user_id,
+    )
+    return _serialize_ai_provider_status(record)
+
+
+@workspaces_router.delete("/{workspace_id}/ai-provider", status_code=status.HTTP_204_NO_CONTENT)
+def delete_workspace_ai_provider(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="admin")
+    delete_global_openai_credentials(db)
 
 
 @workspaces_router.get(

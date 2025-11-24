@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from openai import OpenAI
 import os
 import json
 from dotenv import load_dotenv
@@ -10,14 +9,7 @@ from .database import get_db
 from .models import Project, Roadmap
 from .workspaces import get_project_in_workspace
 from backend.rbac import ensure_project_access
-
-# Load environment variables
-load_dotenv()
-_openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
-_openai_org = os.getenv("OPENAI_ORG")
-if _openai_org:
-    _openai_kwargs["organization"] = _openai_org
-client = OpenAI(**_openai_kwargs)
+from backend.ai_providers import get_openai_client
 
 router = APIRouter()
 
@@ -56,6 +48,7 @@ def generate_roadmap(id: str, workspace_id: UUID, user_id: UUID, db: Session = D
     """
 
     # Call OpenAI
+    client = get_openai_client(db, workspace_id)
     response = client.chat.completions.create(
         model="gpt-4.1",
         messages=[{"role": "user", "content": prompt}],

@@ -4,7 +4,15 @@ export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000"
 
 export type WorkspaceRole = "admin" | "editor" | "viewer";
 export type ProjectRole = "owner" | "contributor" | "viewer";
-export type KnowledgeBaseEntryType = "document" | "prd" | "insight" | "research" | "repo" | "ai_output";
+export type KnowledgeBaseEntryType =
+  | "document"
+  | "prd"
+  | "insight"
+  | "research"
+  | "repo"
+  | "ai_output"
+  | "roadmap"
+  | "prototype";
 
 const MISSING_USER_ERROR = "User session missing. Please sign in again.";
 
@@ -403,6 +411,20 @@ export type WorkspaceInvitation = {
   cancelled_at?: string | null;
 };
 
+export type WorkspaceAIProviderStatus = {
+  provider: "openai";
+  is_enabled: boolean;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+
+export type WorkspaceAIProviderPayload = {
+  api_key: string;
+  organization?: string | null;
+  project?: string | null;
+  user_id?: string | null;
+};
+
 export type GitHubProjectContext = {
   repo: GitHubRepoRecord | null;
   available_repos: GitHubRepoRecord[];
@@ -456,6 +478,48 @@ export type BuilderPrototypeRecord = {
 export type TaskGenerationResponse = {
   tasks: TaskGenerationItem[];
   context_entries?: KnowledgeBaseContextItem[] | null;
+};
+
+export type DashboardPRD = {
+  id: string;
+  title: string;
+  status: string;
+  updated_at: string;
+};
+
+export type DashboardRoadmap = {
+  current_phase?: string | null;
+  completion_percent: number;
+  total_tasks: number;
+  done_tasks: number;
+};
+
+export type DashboardTasks = {
+  total: number;
+  todo: number;
+  in_progress: number;
+  done: number;
+};
+
+export type DashboardSprint = {
+  velocity: number;
+  completed_last_7_days: number;
+  velocity_trend: number[];
+  updated_at: string;
+};
+
+export type DashboardOverview = {
+  prds: DashboardPRD[];
+  roadmap: DashboardRoadmap;
+  tasks: DashboardTasks;
+  sprint: DashboardSprint;
+  updated_at: string;
+};
+
+export type DashboardCoach = {
+  message: string;
+  suggestions: string[];
+  confidence: number;
 };
 
 export async function startGitHubAuth(workspaceId: string, userId: string, redirectOverride?: string) {
@@ -1199,6 +1263,29 @@ export async function loginWithGoogle(credential: string): Promise<AuthResponse>
   return res.json();
 }
 
+export async function getDashboardOverview(workspaceId: string, userId: string): Promise<DashboardOverview> {
+  const query = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/dashboard/overview?${query}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load dashboard overview");
+  }
+  return res.json();
+}
+
+export async function getDashboardCoach(workspaceId: string, userId: string): Promise<DashboardCoach> {
+  const res = await fetch(`${API_BASE}/dashboard/coach`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_id: workspaceId, user_id: userId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load AI coach insight");
+  }
+  return res.json();
+}
+
 export async function logout() {
   try {
     await fetch(`${API_BASE}/auth/logout`, { method: "POST" });
@@ -1266,6 +1353,73 @@ export async function getWorkspaceInvitations(
   const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invitations?${params}`);
   if (!res.ok) throw new Error("Failed to load invitations");
   return res.json();
+}
+
+function normalizeProviderPayload(payload: WorkspaceAIProviderPayload) {
+  return {
+    provider: "openai",
+    api_key: payload.api_key,
+    organization: payload.organization,
+    project: payload.project,
+    user_id: resolveUserId(payload.user_id),
+  };
+}
+
+export async function getWorkspaceAIProviderStatus(
+  workspaceId: string,
+  userId?: string | null
+): Promise<WorkspaceAIProviderStatus> {
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/ai-provider?user_id=${resolveUserId(userId)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load AI provider status");
+  }
+  return res.json();
+}
+
+export async function testWorkspaceAIProvider(workspaceId: string, payload: WorkspaceAIProviderPayload) {
+  const body = normalizeProviderPayload(payload);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/ai-provider/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to verify OpenAI key");
+  }
+  try {
+    await res.json();
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function saveWorkspaceAIProvider(
+  workspaceId: string,
+  payload: WorkspaceAIProviderPayload
+): Promise<WorkspaceAIProviderStatus> {
+  const body = normalizeProviderPayload(payload);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/ai-provider`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to save OpenAI key");
+  }
+  return res.json();
+}
+
+export async function deleteWorkspaceAIProvider(workspaceId: string, userId?: string | null) {
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/ai-provider?user_id=${resolveUserId(userId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to remove OpenAI key");
+  }
 }
 
 // ---------------- Knowledge Base ----------------

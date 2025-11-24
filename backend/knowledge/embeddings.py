@@ -1,18 +1,23 @@
-import os
-from openai import OpenAI
+from typing import Sequence
+from uuid import UUID
 
-_openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
-_openai_org = os.getenv("OPENAI_ORG")
-if _openai_org:
-    _openai_kwargs["organization"] = _openai_org
-client = OpenAI(**_openai_kwargs)
+from sqlalchemy.orm import Session
 
-def generate_embedding(text: str):
+from backend.ai_providers import get_openai_client
+
+
+def generate_embedding(
+    text: str,
+    *,
+    db: Session | None = None,
+    workspace_id: UUID | None = None,
+) -> Sequence[float]:
     """
     Generate an embedding for a chunk of text using OpenAI.
     """
+    client = get_openai_client(db, workspace_id)
     response = client.embeddings.create(
         model="text-embedding-3-small",  # ✅ efficient and cheap
-        input=text
+        input=text,
     )
     return response.data[0].embedding

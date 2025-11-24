@@ -6,15 +6,15 @@ from textwrap import dedent
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from openai import OpenAI, OpenAIError
+from openai import OpenAIError
 from sqlalchemy.orm import Session
 
 from backend import schemas
+from backend.ai_providers import get_openai_client
 from backend.database import get_db
 from backend.models import PrototypeSession, PrototypeMessage
 from backend.knowledge.prototypes import (
     build_project_context_summary,
-    generate_spec_with_openai,
     fallback_spec,
     parse_spec,
     build_static_bundle,
@@ -86,12 +86,16 @@ def _call_agent(  # noqa: PLR0913
 
     user_prompt = new_prompt or "Please synthesise the prototype based on the latest project context."
 
-    api_key = os.getenv("OPENAI_API_KEY")
     data = None
     model_used: str | None = None
 
-    if api_key:
-        client = OpenAI(api_key=api_key)
+    try:
+        client = get_openai_client(db, workspace_id)
+    except Exception as exc:  # pragma: no cover - configuration issue
+        logger.warning("Prototype agent unavailable for workspace %s: %s", workspace_id, exc)
+        client = None
+
+    if client:
         messages = [
             {"role": "system", "content": PROTOTYPE_AGENT_SYSTEM_PROMPT},
             {"role": "system", "content": f"Project context:\n{context}"},
@@ -106,8 +110,6 @@ def _call_agent(  # noqa: PLR0913
         for model_name in configured_candidates + default_candidates:
             if model_name and model_name not in model_candidates:
                 model_candidates.append(model_name)
-
-        data = None
 
         for model_name in model_candidates:
             try:

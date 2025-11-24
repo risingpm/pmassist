@@ -146,7 +146,7 @@ def create_text_entry(
     )
     db.add(entry)
     db.flush()
-    update_entry_embedding(db, entry, text_override=payload.content or entry.title)
+    update_entry_embedding(db, entry, workspace_id=workspace_id, text_override=payload.content or entry.title)
     db.commit()
     db.refresh(entry)
     return _serialize_entry(entry)
@@ -206,7 +206,7 @@ async def upload_kb_entry(
         )
         db.add(doc)
 
-    update_entry_embedding(db, entry, text_override=extracted)
+    update_entry_embedding(db, entry, workspace_id=workspace_id, text_override=extracted)
     db.commit()
     db.refresh(entry)
     return _serialize_entry(entry)
@@ -252,7 +252,7 @@ def update_entry(
     if payload.tags is not None:
         entry.tags = _parse_tags(payload.tags)
     if payload.content is not None or payload.title is not None:
-        update_entry_embedding(db, entry)
+        update_entry_embedding(db, entry, workspace_id=workspace_id)
     db.add(entry)
     db.commit()
     db.refresh(entry)
@@ -318,7 +318,7 @@ def embed_entry(
     )
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
-    update_entry_embedding(db, entry)
+    update_entry_embedding(db, entry, workspace_id=workspace_id)
     db.commit()
     db.refresh(entry)
     return _serialize_entry(entry)

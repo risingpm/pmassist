@@ -42,7 +42,11 @@ def search_knowledge(
 
     entry_ids: list[UUID] = []
     try:
-        query_embedding = generate_embedding(normalized_query[:EMBED_TEXT_LIMIT])
+        query_embedding = generate_embedding(
+            normalized_query[:EMBED_TEXT_LIMIT],
+            db=db,
+            workspace_id=workspace_id,
+        )
         vector_literal = "[" + ",".join(f"{value:.10f}" for value in query_embedding) + "]"
         params["embedding"] = vector_literal
         sql = (

@@ -6,7 +6,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from openai import (
-    OpenAI,
     APIConnectionError,
     APIError,
     APIStatusError,
@@ -22,12 +21,7 @@ from backend.models import Project, Roadmap, RoadmapConversation, UserAgent
 from backend.rbac import ensure_project_access
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
 from backend.workspaces import get_project_in_workspace
-
-_openai_kwargs = {"api_key": os.getenv("OPENAI_API_KEY")}
-_openai_org = os.getenv("OPENAI_ORG")
-if _openai_org:
-    _openai_kwargs["organization"] = _openai_org
-client = OpenAI(**_openai_kwargs)
+from backend.ai_providers import get_openai_client
 
 DEFAULT_SUGGESTIONS = {
     "vision": [
@@ -247,6 +241,7 @@ def generate_roadmap_endpoint(
     )
 
     try:
+        client = get_openai_client(db, payload.workspace_id)
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=openai_messages,
