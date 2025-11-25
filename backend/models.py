@@ -63,6 +63,11 @@ class Workspace(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    templates = relationship(
+        "Template",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
 
 
 class WorkspaceMember(Base):
@@ -472,3 +477,46 @@ class BuilderPrototype(Base):
 
     workspace = relationship("Workspace")
     project = relationship("Project")
+
+
+class Template(Base):
+    __tablename__ = "templates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(String, nullable=True)
+    visibility = Column(String, nullable=False, default="private")
+    tags = Column(ARRAY(String), default=list)
+    version = Column(Integer, nullable=False, default=1)
+    is_recommended = Column(Boolean, nullable=False, default=False)
+    recommended_reason = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="templates")
+    versions = relationship(
+        "TemplateVersion",
+        back_populates="template",
+        cascade="all, delete-orphan",
+        order_by="TemplateVersion.version_number",
+        lazy="selectin",
+    )
+
+
+class TemplateVersion(Base):
+    __tablename__ = "template_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("templates.id", ondelete="CASCADE"), nullable=False)
+    version_number = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)
+    content_format = Column(String, nullable=False, default="markdown")
+    content_metadata = Column(JSONB, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    template = relationship("Template", back_populates="versions")

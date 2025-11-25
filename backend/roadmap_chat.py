@@ -69,6 +69,7 @@ def _process_chat_turn(
         conversation_history=existing_history,
         user_id=payload.user_id,
         workspace_id=payload.workspace_id,
+        template_id=payload.template_id,
     )
     response = roadmap_ai.generate_roadmap_endpoint(str(payload.project_id), request_payload, db=db)
 
