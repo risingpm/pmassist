@@ -22,6 +22,7 @@ from backend.rbac import ensure_project_access
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
 from backend.workspaces import get_project_in_workspace
 from backend.ai_providers import get_openai_client
+from backend.template_service import get_template_version
 
 DEFAULT_SUGGESTIONS = {
     "vision": [
@@ -236,6 +237,18 @@ def generate_roadmap_endpoint(
         {"role": "system", "content": system_message},
         {"role": "user", "content": f"Project context:\n{context_block}"},
     ]
+
+    if payload.template_id:
+        try:
+            template, version = get_template_version(db, payload.workspace_id, payload.template_id)
+            openai_messages.append(
+                {
+                    "role": "system",
+                    "content": f"Use the following roadmap template titled '{template.title}':\n{version.content}",
+                }
+            )
+        except HTTPException:
+            pass
     openai_messages.extend(
         {"role": msg.role, "content": msg.content} for msg in effective_history
     )

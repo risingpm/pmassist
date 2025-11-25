@@ -13,6 +13,7 @@ ProjectRoleLiteral = Literal["owner", "contributor", "viewer"]
 class PRDCreate(BaseModel):
     feature_name: str     # Optional feature name
     prompt: str           # Optional user prompt
+    template_id: UUID | None = None
 
     class Config:
         extra = "ignore"  # Ignore extra/missing fields so `{}` works
@@ -72,6 +73,7 @@ class RoadmapGenerateRequest(BaseModel):
     conversation_history: list[RoadmapChatMessage] = Field(default_factory=list)
     user_id: UUID | None = None
     workspace_id: UUID
+    template_id: UUID | None = None
 
 
 class RoadmapGenerateResponse(BaseModel):
@@ -90,6 +92,7 @@ class RoadmapChatTurnRequest(BaseModel):
     user_id: UUID
     prompt: str
     chat_id: UUID | None = None
+    template_id: UUID | None = None
 
 
 class RoadmapChatRecord(BaseModel):
@@ -247,6 +250,81 @@ class TaskGenerationRequest(BaseModel):
 class TaskGenerationResponse(BaseModel):
     tasks: list[TaskGenerationItem]
     context_entries: list["KnowledgeBaseContextItem"] | None = None
+
+
+TemplateVisibilityLiteral = Literal["private", "shared", "system"]
+TemplateFormatLiteral = Literal["markdown", "json"]
+
+
+class TemplateVersionResponse(BaseModel):
+    id: UUID
+    template_id: UUID
+    version_number: int
+    content: str
+    content_format: TemplateFormatLiteral
+    metadata: dict[str, Any] | None = None
+    created_by: UUID | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TemplateResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID | None = None
+    title: str
+    description: str | None = None
+    category: str | None = None
+    visibility: TemplateVisibilityLiteral
+    tags: list[str]
+    version: int
+    is_recommended: bool
+    recommended_reason: str | None = None
+    created_by: UUID | None = None
+    updated_by: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    latest_version: TemplateVersionResponse
+
+    class Config:
+        from_attributes = True
+
+
+class TemplateDetailResponse(TemplateResponse):
+    versions: list[TemplateVersionResponse]
+
+
+class TemplateCreate(BaseModel):
+    title: str
+    description: str | None = None
+    category: str | None = None
+    visibility: TemplateVisibilityLiteral = "private"
+    tags: list[str] | None = None
+    content: str
+    content_format: TemplateFormatLiteral = "markdown"
+    metadata: dict[str, Any] | None = None
+
+
+class TemplateUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    category: str | None = None
+    visibility: TemplateVisibilityLiteral | None = None
+    tags: list[str] | None = None
+    content: str | None = None
+    content_format: TemplateFormatLiteral | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class TemplateForkRequest(BaseModel):
+    title: str | None = None
+    visibility: TemplateVisibilityLiteral | None = None
+
+
+class TemplateApplyResponse(BaseModel):
+    template: TemplateResponse
+    version: TemplateVersionResponse
 
 
 class RoadmapUpdateRequest(BaseModel):

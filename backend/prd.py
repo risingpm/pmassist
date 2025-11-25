@@ -8,6 +8,7 @@ from .workspaces import get_project_in_workspace
 from backend.rbac import ensure_project_access
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
 from backend.ai_providers import get_openai_client
+from backend.template_service import get_template_version
 
 from fastapi.responses import FileResponse
 from docx import Document as DocxDocument
@@ -93,6 +94,16 @@ def generate_prd(
     if not context_block:
         context_block = "No workspace knowledge-base entries yet."
 
+    template_section = ""
+    if getattr(prd_data, "template_id", None):
+        try:
+            template, version = get_template_version(db, workspace_id, prd_data.template_id)
+            template_section = (
+                f"\nUse the following template structure titled '{template.title}':\n{version.content}\n"
+            )
+        except HTTPException:
+            template_section = ""
+
     # build prompt
     prompt = f"""
 Generate a Product Requirements Document (PRD) in **Markdown** format.
@@ -116,6 +127,7 @@ Workspace Knowledge Base:
 
 Task: Generate a PRD for feature: {prd_data.feature_name}
 User instructions: {prd_data.prompt}
+{template_section}
 """
 
     client = get_openai_client(db, workspace_id)

@@ -24,7 +24,7 @@ import {
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
 import { useUserRole } from "../context/RoleContext";
-import { normalizeWorkspaceRole } from "../utils/roles";
+import { normalizeWorkspaceRole as normalizeWorkspaceRoleValue } from "../utils/roles";
 
 type PanelView = "projects" | "workspace-members" | "knowledge-base";
 
@@ -73,9 +73,14 @@ export default function ProjectsPage() {
     [projects]
   );
 
+  const templateLibraryHref = useMemo(() => {
+    const target = workspaceId || (workspaces.length > 0 ? workspaces[0].id : null);
+    return target ? `/templates?workspace=${target}` : "/templates";
+  }, [workspaceId, workspaces]);
+
   const applyWorkspaceContext = useCallback(
     (workspace: WorkspaceSummary, nextView?: PanelView) => {
-      const role = normalizeWorkspaceRole(workspace.role);
+      const role = normalizeWorkspaceRoleValue(workspace.role);
       setWorkspaceId(workspace.id);
       setWorkspaceName(workspace.name);
       setWorkspaceRole(role);
@@ -315,7 +320,7 @@ export default function ProjectsPage() {
           if (current) {
             setWorkspaceName(current.name);
             window.sessionStorage.setItem(WORKSPACE_NAME_KEY, current.name);
-            const role = normalizeWorkspaceRole(current.role);
+            const role = normalizeWorkspaceRoleValue(current.role);
             setWorkspaceRole(role);
           }
         }
@@ -349,7 +354,7 @@ export default function ProjectsPage() {
           if (match) {
             setWorkspaceName(match.name);
             window.sessionStorage.setItem(WORKSPACE_NAME_KEY, match.name);
-            const role = normalizeWorkspaceRole(match.role);
+            const role = normalizeWorkspaceRoleValue(match.role);
             setWorkspaceRole(role);
           }
         } catch (err) {
@@ -463,73 +468,74 @@ export default function ProjectsPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="flex min-h-screen">
-        <aside className="hidden w-64 flex-shrink-0 flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-sm md:flex">
-          <div className="flex items-center gap-3 pb-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-lg font-semibold text-blue-600">
-              PM
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-700">Workspaces</p>
-              <p className="text-xs text-slate-400">Switch or manage context</p>
-            </div>
+        <aside className="hidden w-72 flex-shrink-0 flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-sm md:flex">
+          <div className="pb-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Workspaces</p>
+            <p className="text-sm text-slate-500">Switch context or manage settings.</p>
           </div>
-          <nav className="flex-1 space-y-2 overflow-y-auto text-sm">
+          <nav className="flex-1 space-y-3 overflow-y-auto text-sm">
             {workspaces.map((ws) => {
               const isActiveWorkspace = ws.id === workspaceId;
               return (
-                <div key={ws.id} className="space-y-2">
-                  <button
-                    onClick={() => handleWorkspaceNavigation(ws, "projects")}
-                    className={`w-full rounded-2xl px-3 py-2 text-left transition ${
-                      isActiveWorkspace
-                        ? "bg-blue-100/80 text-blue-700"
-                        : "text-slate-600 hover:bg-slate-100"
-                    }`}
+                <details
+                  key={ws.id}
+                  className="rounded-2xl border border-slate-100 bg-slate-50/60 px-3 py-2"
+                  open={isActiveWorkspace}
+                >
+                  <summary
+                    className={`cursor-pointer text-sm font-semibold ${isActiveWorkspace ? "text-blue-700" : "text-slate-600"}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      handleWorkspaceNavigation(ws, "projects");
+                    }}
                   >
                     {ws.name}
-                  </button>
-                  <div className="ml-3 border-l border-slate-100 pl-3 text-xs">
-                    <button
-                      onClick={() => {
-                        navigate(`/dashboard?workspace=${ws.id}`);
-                      }}
-                      className="mb-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
-                    >
-                      Dashboard
-                    </button>
-                    <button
-                      onClick={() => handleWorkspaceNavigation(ws, "projects")}
-                      className={`mb-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
-                        isActiveWorkspace && activeView === "projects"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-slate-500 hover:bg-slate-100"
-                      }`}
-                    >
-                      Projects
-                    </button>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Settings</p>
-                    <button
-                      onClick={() => handleWorkspaceNavigation(ws, "workspace-members")}
-                      className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
-                        isActiveWorkspace && activeView === "workspace-members"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-slate-500 hover:bg-slate-100"
-                      }`}
-                    >
-                      Members
-                    </button>
-                    <button
-                      onClick={() => handleWorkspaceNavigation(ws, "knowledge-base")}
-                      className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
-                        isActiveWorkspace && activeView === "knowledge-base"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-slate-500 hover:bg-slate-100"
-                      }`}
-                    >
-                      Knowledge Base
-                    </button>
+                  </summary>
+                  <div className="mt-2 space-y-2 border-l border-slate-200 pl-3 text-xs">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-400">Work</p>
+                      <button
+                        onClick={() => navigate(`/dashboard?workspace=${ws.id}`)}
+                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
+                      >
+                        Dashboard
+                      </button>
+                      <button
+                        onClick={() => handleWorkspaceNavigation(ws, "projects")}
+                        className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
+                          isActiveWorkspace && activeView === "projects"
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-slate-500 hover:bg-slate-100"
+                        }`}
+                      >
+                        Projects
+                      </button>
+                      <button
+                        onClick={() => handleWorkspaceNavigation(ws, "knowledge-base")}
+                        className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
+                          isActiveWorkspace && activeView === "knowledge-base"
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-slate-500 hover:bg-slate-100"
+                        }`}
+                      >
+                        Knowledge Base
+                      </button>
+                    </div>
+                    <div>
+                      <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-400">Workspace settings</p>
+                      <button
+                        onClick={() => handleWorkspaceNavigation(ws, "workspace-members")}
+                        className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
+                          isActiveWorkspace && activeView === "workspace-members"
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-slate-500 hover:bg-slate-100"
+                        }`}
+                      >
+                        Members
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </details>
               );
             })}
             {workspaces.length === 0 && !workspaceLoading && (
@@ -539,16 +545,24 @@ export default function ProjectsPage() {
             )}
           </nav>
           {canAdminWorkspace && (
-            <div className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/60 px-4 py-4 text-xs">
-              <p className="font-semibold uppercase tracking-[0.3em] text-slate-400">Global</p>
+            <div className="mt-6 space-y-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-4 text-xs">
+              <p className="font-semibold uppercase tracking-[0.3em] text-slate-400">Global settings</p>
               <Link
                 to="/settings"
-                className="mt-3 block rounded-full bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-100"
+                className="flex items-center justify-between rounded-full bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-100"
               >
-                AI Provider Settings
+                <span>AI Provider</span>
+                <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Admin</span>
               </Link>
-              <p className="mt-2 text-[11px] text-slate-400">
-                Configure the assistant&apos;s OpenAI key for every workspace.
+              <Link
+                to={templateLibraryHref}
+                className="flex items-center justify-between rounded-full bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-100"
+              >
+                <span>Template Library</span>
+                <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">Workspace</span>
+              </Link>
+              <p className="text-[11px] text-slate-400">
+                Configure shared AI behavior and reusable templates across the workspace.
               </p>
             </div>
           )}

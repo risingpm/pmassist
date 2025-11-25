@@ -18,6 +18,7 @@ import ChatInput from "./ChatInput";
 import RoadmapPreviewCard from "./RoadmapPreview";
 import AgentAvatar from "./AgentAvatar";
 import useAgentName from "../hooks/useAgentName";
+import TemplatePickerModal from "./templates/TemplatePickerModal";
 import {
   getProject,
   fetchRoadmap as fetchSavedRoadmap,
@@ -45,28 +46,31 @@ import {
   listTaskComments,
   addTaskComment,
   generateTasksFromAI,
-  type ChatMessage,
-  type ProjectComment,
-  type ProjectRole,
-  type ProjectLink,
-  type PrototypeSession,
-  type Prototype,
-  type WorkspaceRole,
-  type KnowledgeBaseContextItem,
-  type KnowledgeBaseEntry,
-  type KnowledgeBaseEntryType,
-  type KnowledgeBaseEntryPayload,
-  type KnowledgeSearchResult,
-  type TaskRecord,
-  type TaskPayload,
-  type TaskComment,
-  type TaskGenerationItem,
   listKnowledgeBaseEntries,
   createKnowledgeBaseEntry,
   uploadKnowledgeBaseEntry,
   searchKnowledgeBase,
   knowledgeEntryDownloadUrl,
   sendRoadmapChatTurn,
+} from "../api";
+import type {
+  ChatMessage,
+  ProjectComment,
+  ProjectRole,
+  ProjectLink,
+  PrototypeSession,
+  Prototype,
+  WorkspaceRole,
+  KnowledgeBaseContextItem,
+  KnowledgeBaseEntry,
+  KnowledgeBaseEntryType,
+  KnowledgeBaseEntryPayload,
+  KnowledgeSearchResult,
+  TaskRecord,
+  TaskPayload,
+  TaskComment,
+  TaskGenerationItem,
+  TemplateRecord,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
 import { useUserRole } from "../context/RoleContext";
@@ -269,6 +273,8 @@ export default function ProjectDetail({
   const [chatRoadmapContent, setChatRoadmapContent] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
+  const [roadmapTemplate, setRoadmapTemplate] = useState<TemplateRecord | null>(null);
+  const [roadmapTemplateModalOpen, setRoadmapTemplateModalOpen] = useState(false);
 
   const [roadmapPreview, setRoadmapPreview] = useState<RoadmapPreview | null>(null);
   const [isEditingRoadmap, setIsEditingRoadmap] = useState(false);
@@ -869,6 +875,7 @@ export default function ProjectDetail({
         prompt: trimmed,
         chat_id: roadmapChatId,
         user_id: userId,
+        template_id: roadmapTemplate?.id ?? null,
       });
       setRoadmapChatId(response.id);
       setChatMessages(response.messages);
@@ -1747,6 +1754,12 @@ export default function ProjectDetail({
           setGenerateTasksOpen(false);
         }}
       />
+      <TemplatePickerModal
+        open={roadmapTemplateModalOpen}
+        workspaceId={effectiveWorkspaceId}
+        onClose={() => setRoadmapTemplateModalOpen(false)}
+        onSelect={(template) => setRoadmapTemplate(template)}
+      />
       {showAssistant && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30">
           <div className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
@@ -1758,6 +1771,9 @@ export default function ProjectDetail({
                   <p className="text-xs text-slate-500">
                     Co-create a roadmap for "{projectInfo?.title ?? "this project"}" in natural language.
                   </p>
+                  {roadmapTemplate && (
+                    <p className="text-xs text-blue-600">Using template: {roadmapTemplate.title}</p>
+                  )}
                   {!canEditProject && (
                     <p className="mt-1 text-xs text-amber-600">
                       Viewer access: you can read history but not send prompts.
@@ -1766,6 +1782,13 @@ export default function ProjectDetail({
                 </div>
               </div>
               <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRoadmapTemplateModalOpen(true)}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                >
+                  {roadmapTemplate ? `Template: ${roadmapTemplate.title}` : "Choose template"}
+                </button>
                 <button
                   type="button"
                   onClick={handleStartNewConversation}

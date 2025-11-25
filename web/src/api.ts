@@ -105,6 +105,49 @@ export type KnowledgeBaseContextItem = {
   snippet: string;
 };
 
+export type TemplateVisibility = "private" | "shared" | "system";
+export type TemplateFormat = "markdown" | "json";
+
+export type TemplateVersion = {
+  id: string;
+  template_id: string;
+  version_number: number;
+  content: string;
+  content_format: TemplateFormat;
+  metadata?: Record<string, unknown> | null;
+  created_by?: string | null;
+  created_at: string;
+};
+
+export type TemplateRecord = {
+  id: string;
+  workspace_id?: string | null;
+  title: string;
+  description?: string | null;
+  category?: string | null;
+  visibility: TemplateVisibility;
+  tags: string[];
+  version: number;
+  is_recommended: boolean;
+  recommended_reason?: string | null;
+  created_by?: string | null;
+  updated_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  latest_version: TemplateVersion;
+};
+
+export type TemplateDetail = TemplateRecord & {
+  versions: TemplateVersion[];
+};
+
+export type TemplateFilters = {
+  category?: string | null;
+  tag?: string | null;
+  visibility?: TemplateVisibility | null;
+  search?: string | null;
+};
+
 export type KnowledgeBase = {
   id: string;
   workspace_id: string;
@@ -681,7 +724,8 @@ export async function generateRoadmapChat(
   prompt: string,
   conversation: ChatMessage[],
   userId?: string | null,
-  workspaceId?: string
+  workspaceId?: string,
+  templateId?: string | null
 ): Promise<RoadmapGenerateResponse> {
   const res = await fetch(`${API_BASE}/projects/${projectId}/roadmap/generate`, {
     method: "POST",
@@ -691,6 +735,7 @@ export async function generateRoadmapChat(
       conversation_history: conversation,
       user_id: userId ?? null,
       workspace_id: workspaceId ?? null,
+      template_id: templateId ?? null,
     }),
   });
   if (!res.ok) {
@@ -706,6 +751,7 @@ export async function sendRoadmapChatTurn(payload: {
   prompt: string;
   chat_id?: string | null;
   user_id?: string | null;
+  template_id?: string | null;
 }): Promise<RoadmapChatTurnResponse> {
   const res = await fetch(`${API_BASE}/chat/roadmap`, {
     method: "POST",
@@ -713,6 +759,7 @@ export async function sendRoadmapChatTurn(payload: {
     body: JSON.stringify({
       ...payload,
       user_id: payload.user_id ?? resolveUserId(),
+      template_id: payload.template_id ?? null,
     }),
   });
   if (!res.ok) {
@@ -910,7 +957,7 @@ export async function updateRoadmap(projectId: string, workspaceId: string, cont
 export async function createPrd(
   projectId: string,
   workspaceId: string,
-  body: { feature_name: string; prompt: string }
+  body: { feature_name: string; prompt: string; template_id?: string | null }
 ): Promise<PRDRecord> {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prd`, workspaceId), {
     method: "POST",
@@ -947,6 +994,141 @@ export async function refinePrd(
     body: JSON.stringify({ instructions })
   });
   if (!res.ok) throw new Error("Failed to refine PRD");
+  return res.json();
+}
+
+// ---------------- Templates ----------------
+export type TemplateCreatePayload = {
+  title: string;
+  description?: string | null;
+  category?: string | null;
+  visibility?: TemplateVisibility;
+  tags?: string[];
+  content: string;
+  content_format?: TemplateFormat;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type TemplateUpdatePayload = Partial<Omit<TemplateCreatePayload, "content" | "content_format" | "metadata">> & {
+  content?: string;
+  content_format?: TemplateFormat;
+  metadata?: Record<string, unknown> | null;
+  visibility?: TemplateVisibility;
+};
+
+export async function listTemplates(
+  workspaceId: string,
+  filters: TemplateFilters = {},
+  limit = 100
+): Promise<TemplateRecord[]> {
+  const extra: Record<string, string | undefined> = { limit: String(limit) };
+  if (filters.category) extra.category = filters.category;
+  if (filters.visibility) extra.visibility = filters.visibility;
+  if (filters.tag) extra.tag = filters.tag;
+  if (filters.search) extra.search = filters.search;
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates`, workspaceId, undefined, extra));
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load templates");
+  }
+  return res.json();
+}
+
+export async function getTemplate(workspaceId: string, templateId: string): Promise<TemplateDetail> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates/${templateId}`, workspaceId));
+  if (!res.ok) throw new Error("Failed to load template");
+  return res.json();
+}
+
+export async function createTemplate(workspaceId: string, payload: TemplateCreatePayload): Promise<TemplateDetail> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to create template");
+  }
+  return res.json();
+}
+
+export async function updateTemplate(
+  workspaceId: string,
+  templateId: string,
+  payload: TemplateUpdatePayload
+): Promise<TemplateDetail> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates/${templateId}`, workspaceId), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to update template");
+  }
+  return res.json();
+}
+
+export async function deleteTemplate(workspaceId: string, templateId: string) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates/${templateId}`, workspaceId), {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to delete template");
+  }
+}
+
+export async function forkTemplate(
+  workspaceId: string,
+  templateId: string,
+  payload?: { title?: string; visibility?: TemplateVisibility }
+): Promise<TemplateDetail> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates/${templateId}/fork`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to fork template");
+  }
+  return res.json();
+}
+
+export async function rollbackTemplate(
+  workspaceId: string,
+  templateId: string,
+  version: number
+): Promise<TemplateDetail> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates/${templateId}/versions/${version}/rollback`, workspaceId),
+    {
+      method: "POST",
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to rollback template");
+  }
+  return res.json();
+}
+
+export async function applyTemplate(
+  workspaceId: string,
+  templateId: string,
+  version?: number
+): Promise<{ template: TemplateRecord; version: TemplateVersion }> {
+  const extra: Record<string, string | undefined> = {};
+  if (version) extra.version = String(version);
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/templates/${templateId}/apply`, workspaceId, undefined, extra)
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load template content");
+  }
   return res.json();
 }
 
