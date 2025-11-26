@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useParams } from "react-router-dom";
 
-import {
-  getDashboardOverview,
-  getDashboardCoach,
-  type DashboardOverview,
-  type DashboardCoach,
-} from "../../api";
+import { getDashboardOverview, type DashboardOverview, type WorkspaceInsight } from "../../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../../constants";
 import AgentAvatar from "../../components/AgentAvatar";
 import useAgentName from "../../hooks/useAgentName";
+import useWorkspaceInsights from "../../hooks/useWorkspaceInsights";
+import AskWorkspaceDrawer from "../../components/AskWorkspaceDrawer";
 
 function useSessionUser() {
   return useMemo(() => {
@@ -29,12 +26,14 @@ function useSessionUser() {
 
 export default function WorkspaceDashboard() {
   const navigate = useNavigate();
+  const { workspaceId: routeWorkspaceId } = useParams<{ workspaceId?: string }>();
   const sessionUserId = useSessionUser();
   const agentName = useAgentName();
-  const [workspaceId] = useState(() => {
+  const workspaceId = useMemo(() => {
+    if (routeWorkspaceId) return routeWorkspaceId;
     if (typeof window === "undefined") return null;
     return window.sessionStorage.getItem(WORKSPACE_ID_KEY);
-  });
+  }, [routeWorkspaceId]);
   const workspaceName = useMemo(() => {
     if (typeof window === "undefined") return "Workspace";
     return window.sessionStorage.getItem(WORKSPACE_NAME_KEY) || "Workspace";
@@ -42,10 +41,13 @@ export default function WorkspaceDashboard() {
 
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
-  const [coach, setCoach] = useState<DashboardCoach | null>(null);
-  const [coachLoading, setCoachLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [coachError, setCoachError] = useState<string | null>(null);
+  const [coachDrawerOpen, setCoachDrawerOpen] = useState(false);
+  const [coachStatus, setCoachStatus] = useState<string | null>(null);
+  const { insight, loading: coachLoading, error: coachError, regenerate, regenerating } = useWorkspaceInsights(
+    workspaceId,
+    sessionUserId
+  );
 
   useEffect(() => {
     if (!workspaceId || !sessionUserId) {
@@ -68,27 +70,6 @@ export default function WorkspaceDashboard() {
     run();
   }, [workspaceId, sessionUserId]);
 
-  const fetchCoach = async () => {
-    if (!workspaceId || !sessionUserId) return;
-    setCoachLoading(true);
-    setCoachError(null);
-    try {
-      const insight = await getDashboardCoach(workspaceId, sessionUserId);
-      setCoach(insight);
-    } catch (err: any) {
-      setCoachError(err.message || "AI coach is unavailable. Try again later.");
-    } finally {
-      setCoachLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (workspaceId && sessionUserId) {
-      fetchCoach();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, sessionUserId]);
-
   const renderVelocityBars = () => {
     if (!overview) return null;
     const max = Math.max(...overview.sprint.velocity_trend, 1);
@@ -106,6 +87,23 @@ export default function WorkspaceDashboard() {
     );
   };
 
+  const handleRegenerate = async () => {
+    setCoachStatus("Refreshing insight…");
+    const updated = await regenerate();
+    if (updated) {
+      const ts = new Date(updated.generated_at);
+      setCoachStatus(`Insight refreshed ${ts.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`);
+    } else if (!coachError) {
+      setCoachStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    if (coachError) {
+      setCoachStatus(null);
+    }
+  }, [coachError]);
+
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-6xl px-6 py-10">
@@ -121,7 +119,7 @@ export default function WorkspaceDashboard() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              to="/projects"
+              to={workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects"}
               className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
             >
               View Projects
@@ -130,7 +128,7 @@ export default function WorkspaceDashboard() {
               type="button"
               onClick={() => {
                 if (!workspaceId) return;
-                navigate(`/projects?workspace=${workspaceId}`);
+                navigate(`/workspaces/${workspaceId}/projects`);
               }}
               className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
             >
@@ -249,7 +247,7 @@ export default function WorkspaceDashboard() {
                   <AgentAvatar size="sm" />
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Workspace AI</p>
-                    <p className="text-base font-semibold text-slate-900">Chat with {agentName}</p>
+                    <p className="text-base font-semibold text-slate-900">AI Coach — {agentName}</p>
                   </div>
                 </div>
               }
@@ -260,29 +258,39 @@ export default function WorkspaceDashboard() {
                   {coachError}
                 </div>
               )}
-              {coach ? (
+              {!coachError && insight ? (
                 <div className="space-y-4">
-                  <p className="text-sm text-slate-600">{coach.message}</p>
-                  <ul className="space-y-2 text-sm text-slate-600">
-                    {coach.suggestions.map((suggestion, idx) => (
-                      <li key={idx} className="flex gap-2">
-                        <span className="text-slate-400">•</span>
-                        <span>{suggestion}</span>
-                      </li>
+                  <p className="text-sm text-slate-600">{insight.summary}</p>
+                  <p className="text-xs text-slate-400">
+                    Updated {new Date(insight.generated_at).toLocaleString(undefined, { hour: "numeric", minute: "2-digit" })}
+                  </p>
+                  <div className="space-y-2">
+                    {insight.recommendations.slice(0, 3).map((item, idx) => (
+                      <div key={`${item.title}-${idx}`} className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+                        <p className="text-[10px] uppercase tracking-[0.3em] text-blue-500">{item.severity || "Insight"}</p>
+                        <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                        <p className="text-xs text-slate-600">{item.description}</p>
+                      </div>
                     ))}
-                  </ul>
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <p>Confidence: {(coach.confidence * 100).toFixed(0)}%</p>
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={fetchCoach}
-                        className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-white"
-                      >
-                        Refresh insight
-                      </button>
-                    </div>
                   </div>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCoachDrawerOpen(true)}
+                      className="flex-1 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      View details
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRegenerate}
+                      disabled={regenerating}
+                      className="flex-1 rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {regenerating ? "Refreshing..." : "Regenerate"}
+                    </button>
+                  </div>
+                  {coachStatus && <p className="text-xs text-slate-400">{coachStatus}</p>}
                 </div>
               ) : (
                 <EmptyState message={`${agentName} will share insights once data is available.`} />
@@ -291,6 +299,16 @@ export default function WorkspaceDashboard() {
           </div>
         </div>
       </div>
+      {coachDrawerOpen && insight && (
+        <CoachDrawer
+          insight={insight}
+          agentName={agentName}
+          onClose={() => setCoachDrawerOpen(false)}
+          onRefresh={handleRegenerate}
+          refreshing={regenerating}
+        />
+      )}
+      <AskWorkspaceDrawer workspaceId={workspaceId} userId={sessionUserId} agentName={agentName} />
     </div>
   );
 }
@@ -326,4 +344,75 @@ function Skeleton() {
 
 function EmptyState({ message }: { message: string }) {
   return <p className="text-sm text-slate-400">{message}</p>;
+}
+
+type CoachDrawerProps = {
+  insight: WorkspaceInsight;
+  agentName: string;
+  onClose: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+};
+
+function CoachDrawer({ insight, agentName, onClose, onRefresh, refreshing }: CoachDrawerProps) {
+  return (
+    <div className="fixed inset-0 z-40 flex justify-center bg-slate-900/40 backdrop-blur">
+      <div className="mt-10 w-full max-w-3xl rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">AI Coach</p>
+            <h3 className="text-xl font-semibold text-slate-900">{agentName} insights</h3>
+            <p className="text-xs text-slate-400">Updated {new Date(insight.generated_at).toLocaleString()}</p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {refreshing ? "Refreshing..." : "Regenerate"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
+          <section className="space-y-4">
+            <p className="text-sm text-slate-600">{insight.summary}</p>
+            <div className="space-y-3">
+              {insight.recommendations.map((item) => (
+                <div key={item.title} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.3em] text-blue-500">{item.severity || "Insight"}</p>
+                  <h4 className="text-sm font-semibold text-slate-900">{item.title}</h4>
+                  <p className="text-sm text-slate-600">{item.description}</p>
+                  {item.related_entry_title && (
+                    <p className="text-xs text-slate-400">Related: {item.related_entry_title}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Context Used</p>
+            {insight.context_entries.length === 0 && (
+              <p className="text-sm text-slate-500">No references captured for this insight.</p>
+            )}
+            {insight.context_entries.map((entry) => (
+              <div key={entry.id} className="rounded-2xl bg-white px-3 py-2 shadow-sm">
+                <p className="text-sm font-semibold text-slate-900">{entry.title}</p>
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">{entry.type}</p>
+                <p className="text-xs text-slate-500">{entry.snippet}</p>
+              </div>
+            ))}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Text
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Text, Float
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.types import UserDefinedType
@@ -67,6 +67,18 @@ class Workspace(Base):
         "Template",
         back_populates="workspace",
         cascade="all, delete-orphan",
+    )
+    insights = relationship(
+        "WorkspaceInsight",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        order_by="WorkspaceInsight.generated_at.desc()",
+    )
+    ai_chats = relationship(
+        "WorkspaceAIChat",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        order_by="WorkspaceAIChat.last_message_at.desc()",
     )
 
 
@@ -520,3 +532,36 @@ class TemplateVersion(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     template = relationship("Template", back_populates="versions")
+
+
+class WorkspaceInsight(Base):
+    __tablename__ = "workspace_insights"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    summary = Column(Text, nullable=False)
+    recommendations = Column(JSONB, nullable=False, default=list)
+    metrics = Column(JSONB, nullable=False)
+    context_entries = Column(JSONB, nullable=True)
+    confidence = Column(Float, nullable=True)
+    generated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="insights")
+    author = relationship("User")
+
+
+class WorkspaceAIChat(Base):
+    __tablename__ = "workspace_ai_chats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=True)
+    messages = Column(JSONB, nullable=False, default=list)
+    context_entries = Column(JSONB, nullable=True)
+    last_message_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="ai_chats")
+    user = relationship("User")

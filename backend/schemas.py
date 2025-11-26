@@ -532,6 +532,52 @@ class DashboardCoachResponse(BaseModel):
     confidence: float
 
 
+class WorkspaceRecommendation(BaseModel):
+    title: str
+    description: str
+    severity: Literal["info", "opportunity", "warning", "risk"] | None = None
+    related_entry_id: UUID | None = None
+    related_entry_title: str | None = None
+
+
+class WorkspaceInsightResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    summary: str
+    recommendations: list[WorkspaceRecommendation]
+    confidence: float | None = None
+    metrics: DashboardOverviewResponse
+    context_entries: list["KnowledgeBaseContextItem"] = Field(default_factory=list)
+    generated_at: datetime
+
+
+class WorkspaceInsightRegenerateRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    force_refresh: bool = False
+
+
+class WorkspaceChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime
+
+
+class WorkspaceChatTurnRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    question: str
+    session_id: UUID | None = None
+
+
+class WorkspaceChatTurnResponse(BaseModel):
+    session_id: UUID
+    answer: str
+    messages: list[WorkspaceChatMessage]
+    context_entries: list["KnowledgeBaseContextItem"] = Field(default_factory=list)
+    updated_at: datetime
+
+
 # ---------------------------------------------------------
 # Knowledge Base
 # ---------------------------------------------------------

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import {
   listTemplates,
@@ -18,17 +18,27 @@ import CreateTemplateModal from "../../components/templates/CreateTemplateModal"
 import TemplatePreviewModal from "../../components/templates/TemplatePreviewModal";
 
 export default function TemplateLibraryPage() {
-  const location = useLocation();
   const navigate = useNavigate();
+  const { workspaceId: routeWorkspaceId } = useParams<{ workspaceId?: string }>();
   const { workspaceRole } = useUserRole();
   const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
 
-  const queryWorkspace = useMemo(() => new URLSearchParams(location.search).get("workspace"), [location.search]);
-  const [workspaceId] = useState(() => queryWorkspace || (typeof window !== "undefined" ? window.sessionStorage.getItem(WORKSPACE_ID_KEY) : null));
+  const [workspaceId, setWorkspaceId] = useState<string | null>(() => {
+    if (routeWorkspaceId) return routeWorkspaceId;
+    if (typeof window === "undefined") return null;
+    return window.sessionStorage.getItem(WORKSPACE_ID_KEY);
+  });
   const workspaceName = useMemo(
     () => (typeof window !== "undefined" ? window.sessionStorage.getItem(WORKSPACE_NAME_KEY) : "Workspace"),
     []
   );
+  useEffect(() => {
+    if (!routeWorkspaceId) return;
+    setWorkspaceId(routeWorkspaceId);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(WORKSPACE_ID_KEY, routeWorkspaceId);
+    }
+  }, [routeWorkspaceId]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +50,6 @@ export default function TemplateLibraryPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDetail | TemplateRecord | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-
   useEffect(() => {
     if (!workspaceId) {
       setError("Select a workspace to manage templates.");
@@ -285,22 +294,24 @@ export default function TemplateLibraryPage() {
             </table>
           </div>
         )}
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(`/projects?workspace=${workspaceId ?? ""}`)}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
-          >
-            ← Back to workspace
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate(`/dashboard?workspace=${workspaceId ?? ""}`)}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
-          >
-            ← Back to dashboard
-          </button>
-        </div>
+        {workspaceId && (
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(`/workspaces/${workspaceId}/projects`)}
+              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
+            >
+              ← Back to workspace
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(`/workspaces/${workspaceId}/dashboard`)}
+              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
+            >
+              ← Back to dashboard
+            </button>
+          </div>
+        )}
       </div>
 
       {modalOpen && (

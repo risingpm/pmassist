@@ -15,6 +15,8 @@ import {
   searchKnowledgeBase,
 } from "../api";
 import UploadEntryModal from "./UploadEntryModal";
+import useWorkspaceInsights from "../hooks/useWorkspaceInsights";
+import useAgentName from "../hooks/useAgentName";
 
 const TABS: Array<{ id: string; label: string; type?: KnowledgeBaseEntryType }> = [
   { id: "documents", label: "Documents", type: "document" },
@@ -30,6 +32,8 @@ const TYPE_LABELS: Record<KnowledgeBaseEntryType, string> = {
   repo: "Repository",
   prd: "PRD",
   ai_output: "AI Output",
+  roadmap: "Roadmap",
+  prototype: "Prototype",
 };
 
 interface KnowledgeBasePanelProps {
@@ -47,6 +51,8 @@ export default function KnowledgeBasePanel({
   userId,
   projectOptions,
 }: KnowledgeBasePanelProps) {
+  const agentName = useAgentName();
+  const { insight: coachInsight } = useWorkspaceInsights(workspaceId, userId);
   const [entries, setEntries] = useState<KnowledgeBaseEntry[]>([]);
   const [activeTab, setActiveTab] = useState(TABS[0].id);
   const [search, setSearch] = useState("");
@@ -194,6 +200,26 @@ export default function KnowledgeBasePanel({
 
   return (
     <section className="mt-8 space-y-6">
+      {coachInsight && (
+        <div className="rounded-3xl border border-slate-900/10 bg-gradient-to-r from-slate-900 to-slate-800 p-6 text-white shadow-lg">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-300">AI Coach · {agentName}</p>
+          <h3 className="mt-2 text-xl font-semibold">{coachInsight.summary}</h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {coachInsight.recommendations.slice(0, 2).map((rec) => (
+              <div key={rec.title} className="rounded-2xl bg-white/10 p-4">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-blue-200">{rec.severity || "Insight"}</p>
+                <p className="text-sm font-semibold text-white/90">{rec.title}</p>
+                <p className="text-xs text-white/70">{rec.description}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-slate-300">
+            {coachInsight.context_entries.length > 0
+              ? `${agentName} referenced ${coachInsight.context_entries.length} knowledge base entries.`
+              : `${agentName} analyzed the latest metrics for this workspace.`}
+          </p>
+        </div>
+      )}
       <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
