@@ -7,6 +7,7 @@ import WorkspaceDashboard from "./pages/Dashboard";
 import BuilderChatPage from "./pages/BuilderChat";
 import PrototypesPage from "./pages/Prototypes";
 import SettingsPage from "./pages/Settings";
+import TemplateLibraryPage from "./pages/Templates";
 import SignInPage from "./pages/SignIn";
 import ForgotPasswordPage from "./pages/ForgotPassword";
 import ResetPasswordPage from "./pages/ResetPassword";
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/builder" element={<BuilderChatPage />} />
         <Route path="/prototypes" element={<PrototypesPage />} />
+        <Route path="/templates" element={<TemplateLibraryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

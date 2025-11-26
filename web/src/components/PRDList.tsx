@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { getPrds, createPrd, deletePrd, type ProjectRole, type KnowledgeBaseContextItem, type PRDRecord } from "../api";
+import { getPrds, createPrd, deletePrd } from "../api";
+import type { ProjectRole, KnowledgeBaseContextItem, PRDRecord, TemplateRecord } from "../api";
 import ContextUsedPanel from "./ContextUsedPanel";
+import TemplatePickerModal from "./templates/TemplatePickerModal";
 
 type PRDListProps = {
   projectId: string;
@@ -22,6 +24,8 @@ export default function PRDList({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [contextEntries, setContextEntries] = useState<KnowledgeBaseContextItem[]>([]);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateRecord | null>(null);
 
   // new state for form
   const [featureName, setFeatureName] = useState("");
@@ -63,13 +67,15 @@ export default function PRDList({
       if (!workspaceId) throw new Error("Missing workspace context");
       const created = await createPrd(projectId, workspaceId, {
         feature_name: featureName,
-        prompt: prompt,
+        prompt,
+        template_id: selectedTemplate?.id ?? null,
       });
       const refreshed = await getPrds(projectId, workspaceId);
       setPrds(refreshed || []);
       setContextEntries(created.context_entries ?? []);
       setFeatureName("");
       setPrompt("");
+      setSelectedTemplate(null);
       setError(null);
       setSuccess("✅ PRD generated successfully");
     } catch (err) {
@@ -158,6 +164,39 @@ export default function PRDList({
           />
         </div>
 
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-700">Template</p>
+              <p className="text-xs text-slate-500">
+                {selectedTemplate ? `Using “${selectedTemplate.title}”` : "Optional: choose a reusable structure."}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {selectedTemplate && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTemplate(null)}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500"
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setTemplateModalOpen(true)}
+                className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white"
+                disabled={!canEdit}
+              >
+                Choose Template
+              </button>
+            </div>
+          </div>
+          {selectedTemplate && (
+            <p className="mt-2 text-sm text-slate-600 line-clamp-2">{selectedTemplate.description}</p>
+          )}
+        </div>
+
         <button
           type="submit"
           disabled={loading || !canEdit}
@@ -228,6 +267,13 @@ export default function PRDList({
           </tbody>
         </table>
       )}
+
+      <TemplatePickerModal
+        open={templateModalOpen}
+        workspaceId={workspaceId}
+        onClose={() => setTemplateModalOpen(false)}
+        onSelect={(template) => setSelectedTemplate(template)}
+      />
     </div>
   );
 }
