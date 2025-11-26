@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import ChatWindow from "../../components/ChatWindow";
 import ChatInput from "../../components/ChatInput";
@@ -20,7 +20,12 @@ import { USER_ID_KEY, WORKSPACE_ID_KEY } from "../../constants";
 
 export default function BuilderChatPage() {
   const navigate = useNavigate();
-  const workspaceId = typeof window !== "undefined" ? window.sessionStorage.getItem(WORKSPACE_ID_KEY) : null;
+  const { workspaceId: routeWorkspaceId } = useParams<{ workspaceId?: string }>();
+  const workspaceId = useMemo(() => {
+    if (routeWorkspaceId) return routeWorkspaceId;
+    if (typeof window === "undefined") return null;
+    return window.sessionStorage.getItem(WORKSPACE_ID_KEY);
+  }, [routeWorkspaceId]);
   const userId = typeof window !== "undefined" ? window.sessionStorage.getItem(USER_ID_KEY) : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);

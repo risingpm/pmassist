@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useMatch } from "react-router-dom";
 
 import ProjectDetail from "../components/ProjectDetail";
 import WorkspaceMembersPanel from "../components/WorkspaceMembersPanel";
@@ -8,6 +8,7 @@ import {
   createProject,
   createWorkspace,
   deleteProject,
+  deleteWorkspace,
   getProjects,
   getUserWorkspaces,
   getWorkspaceInvitations,
@@ -25,8 +26,11 @@ import {
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
 import { useUserRole } from "../context/RoleContext";
 import { normalizeWorkspaceRole as normalizeWorkspaceRoleValue } from "../utils/roles";
+import AskWorkspaceDrawer from "../components/AskWorkspaceDrawer";
+import useAgentName from "../hooks/useAgentName";
 
 type PanelView = "projects" | "workspace-members" | "knowledge-base";
+type ProjectTabRoute = "knowledge" | "roadmap" | "prototypes" | "tasks" | "prd" | "members";
 
 type Project = {
   id: string;
@@ -40,23 +44,54 @@ type Project = {
 export default function ProjectsPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const params = useParams<{ workspaceId?: string; projectId?: string; tab?: string }>();
   const { workspaceRole, setWorkspaceRole, refreshWorkspaceRole } = useUserRole();
+  const agentName = useAgentName();
+  const knowledgeMatch = useMatch("/workspaces/:workspaceId/projects/knowledge");
+  const membersMatch = useMatch("/workspaces/:workspaceId/projects/members");
+  const detailMatch = useMatch("/workspaces/:workspaceId/projects/detail/:projectId/:tab?");
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(() => {
+    if (params.workspaceId) return params.workspaceId;
+    if (typeof window === "undefined") return null;
+    return window.sessionStorage.getItem(WORKSPACE_ID_KEY);
+  });
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [renameLoading, setRenameLoading] = useState(false);
-  const [activeView, setActiveView] = useState<PanelView>("projects");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  useEffect(() => {
+    if (!params.workspaceId) return;
+    setWorkspaceId(params.workspaceId);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(WORKSPACE_ID_KEY, params.workspaceId);
+    }
+  }, [params.workspaceId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hasUser = window.sessionStorage.getItem(AUTH_USER_KEY);
+    if (!hasUser) {
+      navigate("/signin", { replace: true });
+    }
+  }, [navigate]);
 
   const userId = typeof window !== "undefined" ? window.sessionStorage.getItem(USER_ID_KEY) : null;
+  const selectedProjectId = detailMatch?.params?.projectId ?? null;
+  const tabParam = detailMatch?.params?.tab as ProjectTabRoute | undefined;
+  const validTabs: ProjectTabRoute[] = ["knowledge", "roadmap", "prototypes", "tasks", "prd", "members"];
+  const projectDetailTab = tabParam && validTabs.includes(tabParam) ? tabParam : undefined;
+  const activeView: PanelView = knowledgeMatch ? "knowledge-base" : membersMatch ? "workspace-members" : "projects";
+  const isProjectsView = activeView === "projects" && !selectedProjectId;
+  const isKnowledgeBaseView = activeView === "knowledge-base";
 
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([]);
@@ -75,16 +110,15 @@ export default function ProjectsPage() {
 
   const templateLibraryHref = useMemo(() => {
     const target = workspaceId || (workspaces.length > 0 ? workspaces[0].id : null);
-    return target ? `/templates?workspace=${target}` : "/templates";
+    return target ? `/workspaces/${target}/templates` : "/templates";
   }, [workspaceId, workspaces]);
 
   const applyWorkspaceContext = useCallback(
-    (workspace: WorkspaceSummary, nextView?: PanelView) => {
+    (workspace: WorkspaceSummary) => {
       const role = normalizeWorkspaceRoleValue(workspace.role);
       setWorkspaceId(workspace.id);
       setWorkspaceName(workspace.name);
       setWorkspaceRole(role);
-      setActiveView(nextView ?? "projects");
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(WORKSPACE_ID_KEY, workspace.id);
         window.sessionStorage.setItem(WORKSPACE_NAME_KEY, workspace.name);
@@ -137,12 +171,12 @@ export default function ProjectsPage() {
   }, [workspaceId]);
 
   useEffect(() => {
-    if (activeView === "workspace-members") {
+    if (membersMatch) {
       setMembersSuccess(null);
       setMembersError(null);
       refreshMembers();
     }
-  }, [activeView, refreshMembers]);
+  }, [membersMatch, refreshMembers]);
 
   useEffect(() => {
     if (membersSuccess || membersError) {
@@ -219,16 +253,46 @@ export default function ProjectsPage() {
     }
   }
 
+  const resolveWorkspacePath = useCallback((id: string, view: PanelView) => {
+    switch (view) {
+      case "knowledge-base":
+        return `/workspaces/${id}/projects/knowledge`;
+      case "workspace-members":
+        return `/workspaces/${id}/projects/members`;
+      default:
+        return `/workspaces/${id}/projects`;
+    }
+  }, []);
+
   const handleWorkspaceNavigation = useCallback(
     (workspace: WorkspaceSummary, view: PanelView) => {
-      if (workspace.id !== workspaceId) {
-        applyWorkspaceContext(workspace, view);
-        navigate(`/projects?workspace=${workspace.id}`, { replace: true });
-      } else {
-        setActiveView(view);
+      applyWorkspaceContext(workspace);
+      navigate(resolveWorkspacePath(workspace.id, view));
+    },
+    [applyWorkspaceContext, navigate, resolveWorkspacePath]
+  );
+
+  const openKnowledgeBaseView = useCallback(() => {
+    if (!workspaceId) return;
+    navigate(`/workspaces/${workspaceId}/projects/knowledge`);
+  }, [workspaceId, navigate]);
+
+  const handleProjectBack = useCallback(() => {
+    if (!workspaceId) return;
+    navigate(`/workspaces/${workspaceId}/projects`);
+  }, [workspaceId, navigate]);
+
+  const handleProjectTabChange = useCallback(
+    (tab: ProjectTabRoute) => {
+      if (!workspaceId || !selectedProjectId) return;
+      const base = `/workspaces/${workspaceId}/projects/detail/${selectedProjectId}`;
+      const suffix = tab && tab !== "knowledge" ? `/${tab}` : "";
+      const target = `${base}${suffix}`;
+      if (location.pathname !== target) {
+        navigate(target, { replace: true });
       }
     },
-    [applyWorkspaceContext, navigate, workspaceId]
+    [workspaceId, selectedProjectId, navigate, location.pathname]
   );
 
   const inviteWorkspaceCollaborator = useCallback(
@@ -278,30 +342,42 @@ export default function ProjectsPage() {
     [workspaceId, userId]
   );
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hasUser = window.sessionStorage.getItem(AUTH_USER_KEY);
-    if (!hasUser) {
-      navigate("/signin", { replace: true });
+  const handleDeleteWorkspace = useCallback(async () => {
+    if (!workspaceId || !userId) {
+      setErrorMessage("Missing workspace context.");
       return;
     }
-
-    const params = new URLSearchParams(location.search);
-    const fromQuery = params.get("workspace");
-    const storedWorkspace = window.sessionStorage.getItem(WORKSPACE_ID_KEY);
-    const storedName = window.sessionStorage.getItem(WORKSPACE_NAME_KEY);
-
-    const effectiveWorkspace = fromQuery || storedWorkspace;
-    if (effectiveWorkspace) {
-      setWorkspaceId(effectiveWorkspace);
-      if (fromQuery) {
-        window.sessionStorage.setItem(WORKSPACE_ID_KEY, fromQuery);
-      }
-      if (storedName) {
-        setWorkspaceName(storedName);
-      }
+    if (!canAdminWorkspace) {
+      setErrorMessage("Only admins can delete a workspace.");
+      return;
     }
-  }, [navigate, location.search, setWorkspaceRole]);
+    const confirmMessage =
+      "Deleting this workspace will remove all projects, tasks, and documents. This cannot be undone. Continue?";
+    if (!window.confirm(confirmMessage)) return;
+    setDeleteLoading(true);
+    try {
+      await deleteWorkspace(workspaceId, userId);
+      const updatedList = workspaces.filter((ws) => ws.id !== workspaceId);
+      setWorkspaces(updatedList);
+      setSuccessMessage("Workspace deleted.");
+      if (updatedList.length > 0) {
+        const next = updatedList[0];
+        applyWorkspaceContext(next);
+        navigate(`/workspaces/${next.id}/projects`, { replace: true });
+      } else {
+        if (typeof window !== "undefined") {
+          [WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY].forEach((key) => window.sessionStorage.removeItem(key));
+        }
+        setWorkspaceId(null);
+        setWorkspaceName(null);
+        navigate("/onboarding", { replace: true });
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to delete workspace.");
+    } finally {
+      setDeleteLoading(false);
+    }
+  }, [workspaceId, userId, canAdminWorkspace, workspaces, applyWorkspaceContext, navigate]);
 
   useEffect(() => {
     const loadWorkspaces = async () => {
@@ -312,7 +388,7 @@ export default function ProjectsPage() {
         setWorkspaces(list);
         if (!workspaceId && list.length > 0) {
           applyWorkspaceContext(list[0]);
-          navigate(`/projects?workspace=${list[0].id}`, { replace: true });
+          navigate(`/workspaces/${list[0].id}/projects`, { replace: true });
           return;
         }
         if (workspaceId) {
@@ -368,23 +444,19 @@ export default function ProjectsPage() {
     }
   }, [workspaceId, workspaceName, setWorkspaceRole]);
 
-  const isProjectsView = activeView === "projects";
-  const isKnowledgeBaseView = activeView === "knowledge-base";
-
   if (selectedProjectId) {
     return (
       <ProjectDetail
         projectId={selectedProjectId}
         workspaceId={workspaceId}
         workspaceRole={workspaceRole}
+        initialTab={projectDetailTab}
+        onTabChange={handleProjectTabChange}
         onProjectUpdated={(updated) =>
           setProjects((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))
         }
-        onBack={() => setSelectedProjectId(null)}
-        onOpenKnowledgeBase={() => {
-          setSelectedProjectId(null);
-          setActiveView("knowledge-base");
-        }}
+        onBack={handleProjectBack}
+        onOpenKnowledgeBase={openKnowledgeBaseView}
       />
     );
   }
@@ -422,8 +494,7 @@ export default function ProjectsPage() {
       setWorkspaceId(workspace.id);
       setWorkspaceName(workspace.name);
       setWorkspaceRole("admin");
-      setActiveView("projects");
-        navigate(`/projects?workspace=${workspace.id}`, { replace: true });
+      navigate(`/workspaces/${workspace.id}/projects`, { replace: true });
     } catch (err) {
       console.error("Failed to create workspace", err);
       setErrorMessage("Failed to create workspace");
@@ -495,7 +566,7 @@ export default function ProjectsPage() {
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-400">Work</p>
                       <button
-                        onClick={() => navigate(`/dashboard?workspace=${ws.id}`)}
+                        onClick={() => navigate(`/workspaces/${ws.id}/dashboard`)}
                         className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
                       >
                         Dashboard
@@ -601,6 +672,13 @@ export default function ProjectsPage() {
               {renameLoading ? "Renaming..." : "Rename workspace"}
             </button>
             <button
+              disabled={deleteLoading || !workspaceId}
+              onClick={handleDeleteWorkspace}
+              className="w-full rounded-full bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-100 disabled:opacity-60"
+            >
+              {deleteLoading ? "Deleting..." : "Delete workspace"}
+            </button>
+            <button
               onClick={handleSignOut}
               className="w-full rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
             >
@@ -625,13 +703,15 @@ export default function ProjectsPage() {
             <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
               Role: {workspaceRoleLabel}
             </span>
-            <button
-              type="button"
-              onClick={() => navigate("/builder")}
-              className="rounded-full border border-slate-200 px-4 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
-            >
-              Prototype Builder
-            </button>
+            {workspaceId && (
+              <button
+                type="button"
+                onClick={() => navigate(`/workspaces/${workspaceId}/builder`)}
+                className="rounded-full border border-slate-200 px-4 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+              >
+                Prototype Builder
+              </button>
+            )}
           </div>
           <div className="mt-3 md:hidden">
             {workspaces.length > 0 && workspaceId && (
@@ -644,8 +724,7 @@ export default function ProjectsPage() {
                     handleWorkspaceNavigation(entry, "projects");
                   } else {
                     setWorkspaceId(nextId);
-                    setActiveView("projects");
-                    navigate(`/projects?workspace=${nextId}`, { replace: true });
+                    navigate(`/workspaces/${nextId}/projects`, { replace: true });
                   }
                 }}
                 className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600"
@@ -765,7 +844,7 @@ export default function ProjectsPage() {
                       </div>
                       <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4 text-sm">
                         <button
-                          onClick={() => setSelectedProjectId(project.id)}
+                          onClick={() => workspaceId && navigate(`/workspaces/${workspaceId}/projects/detail/${project.id}`)}
                           className="font-semibold text-blue-600 transition hover:text-blue-700"
                         >
                           Open
@@ -810,6 +889,7 @@ export default function ProjectsPage() {
             />
           )}
         </main>
+        <AskWorkspaceDrawer workspaceId={workspaceId} userId={userId} agentName={agentName} />
       </div>
 
       {showCreate && (

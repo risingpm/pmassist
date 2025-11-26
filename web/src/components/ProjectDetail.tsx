@@ -122,6 +122,8 @@ function formatRoadmapForDisplay(content: string): string {
   }
 }
 
+type ProjectTab = "knowledge" | "roadmap" | "prototypes" | "tasks" | "prd" | "members";
+
 type ProjectDetailProps = {
   projectId: string;
   workspaceId: string | null;
@@ -136,6 +138,8 @@ type ProjectDetailProps = {
   }) => void;
   onBack: () => void;
   onOpenKnowledgeBase?: () => void;
+  initialTab?: ProjectTab;
+  onTabChange?: (tab: ProjectTab) => void;
 };
 
 type RoadmapPreview = {
@@ -156,6 +160,8 @@ export default function ProjectDetail({
   onProjectUpdated,
   onBack,
   onOpenKnowledgeBase,
+  initialTab,
+  onTabChange,
 }: ProjectDetailProps) {
   const { projectRoles, refreshProjectRole } = useUserRole();
   const userId = useMemo(() => {
@@ -205,11 +211,7 @@ export default function ProjectDetail({
     target_personas?: string[] | null;
   } | null>(null);
 
-  const [activeTab, setActiveTab] = useState<
-    "knowledge" | "roadmap" | "prototypes" | "tasks" | "prd" | "members"
-  >(
-    "knowledge"
-  );
+  const [activeTab, setActiveTab] = useState<ProjectTab>("knowledge");
   const [knowledgeTab, setKnowledgeTab] = useState<
     "documents" | "comments" | "links" | "insights"
   >("documents");
@@ -292,6 +294,18 @@ export default function ProjectDetail({
     target_personas: "",
   });
   const agentName = useAgentName();
+
+  useEffect(() => {
+    if (initialTab && initialTab !== activeTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, activeTab]);
+
+  useEffect(() => {
+    if (onTabChange) {
+      onTabChange(activeTab);
+    }
+  }, [activeTab, onTabChange]);
 
   useEffect(() => {
     const cached = projectRoles[projectId];

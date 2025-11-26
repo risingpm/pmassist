@@ -20,9 +20,8 @@ if _env_api_key:
 _env_org = os.getenv("OPENAI_ORG")
 if _env_org:
     DEFAULT_OPENAI_KWARGS["organization"] = _env_org
-_env_project = os.getenv("OPENAI_PROJECT")
-if _env_project:
-    DEFAULT_OPENAI_KWARGS["project"] = _env_project
+# NOTE: The OpenAI Python SDK currently does not accept a `project` kwarg on the client,
+# so we ignore OPENAI_PROJECT for now to avoid runtime errors.
 
 
 def _get_cipher() -> Fernet:
@@ -74,10 +73,6 @@ def build_openai_kwargs(db: Session | None, workspace_id: UUID | None) -> dict[s
                 kwargs["organization"] = global_record.organization.strip()
             elif "organization" in kwargs:
                 kwargs.pop("organization")
-            if global_record.project:
-                kwargs["project"] = global_record.project.strip()
-            elif "project" in kwargs:
-                kwargs.pop("project")
             return kwargs
     if workspace_id and db:
         record = _load_workspace_credential(db, workspace_id)
@@ -87,10 +82,6 @@ def build_openai_kwargs(db: Session | None, workspace_id: UUID | None) -> dict[s
                 kwargs["organization"] = record.organization.strip()
             elif "organization" in kwargs:
                 kwargs.pop("organization")
-            if record.project:
-                kwargs["project"] = record.project.strip()
-            elif "project" in kwargs:
-                kwargs.pop("project")
     if "api_key" not in kwargs or not kwargs["api_key"]:
         raise RuntimeError("OPENAI_API_KEY or workspace-specific key must be configured.")
     return kwargs
@@ -105,8 +96,7 @@ def test_openai_credentials(api_key: str, *, organization: str | None = None, pr
     kwargs: dict[str, Any] = {"api_key": api_key.strip()}
     if organization:
         kwargs["organization"] = organization.strip()
-    if project:
-        kwargs["project"] = project.strip()
+    # Project is stored for future compatibility but not passed to the SDK.
     client = OpenAI(**kwargs)
     client.models.list(limit=1)
 

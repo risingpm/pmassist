@@ -216,6 +216,17 @@ def update_workspace(
     )
 
 
+@workspaces_router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_workspace(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
+    if not workspace:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+    ensure_membership(db, workspace_id, user_id, required_role="admin")
+    db.delete(workspace)
+    db.commit()
+
+
 @workspaces_router.get("/{workspace_id}/members", response_model=list[schemas.WorkspaceMemberResponse])
 def list_workspace_members(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
     ensure_membership(db, workspace_id, user_id, required_role="viewer")

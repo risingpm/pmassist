@@ -72,8 +72,11 @@ export default function SignInPage() {
       const agent = await getUserAgent(authResult.id);
       if (agent) {
         setStoredAgentProfile({ name: agent.name || DEFAULT_AGENT_NAME });
-        const target = workspaceId ? `/dashboard?workspace=${workspaceId}` : "/dashboard";
-        navigate(target, { replace: true });
+        if (workspaceId) {
+          navigate(`/workspaces/${workspaceId}/dashboard`, { replace: true });
+        } else {
+          navigate("/onboarding", { replace: true });
+        }
         return;
       }
       setStoredAgentProfile(null);

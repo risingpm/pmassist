@@ -565,6 +565,39 @@ export type DashboardCoach = {
   confidence: number;
 };
 
+export type WorkspaceRecommendation = {
+  title: string;
+  description: string;
+  severity?: "info" | "opportunity" | "warning" | "risk" | null;
+  related_entry_id?: string | null;
+  related_entry_title?: string | null;
+};
+
+export type WorkspaceInsight = {
+  id: string;
+  workspace_id: string;
+  summary: string;
+  recommendations: WorkspaceRecommendation[];
+  confidence?: number | null;
+  metrics: DashboardOverview;
+  context_entries: KnowledgeBaseContextItem[];
+  generated_at: string;
+};
+
+export type WorkspaceChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
+export type WorkspaceChatTurn = {
+  session_id: string;
+  answer: string;
+  messages: WorkspaceChatMessage[];
+  context_entries: KnowledgeBaseContextItem[];
+  updated_at: string;
+};
+
 export async function startGitHubAuth(workspaceId: string, userId: string, redirectOverride?: string) {
   const params = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
   if (redirectOverride) {
@@ -1468,6 +1501,54 @@ export async function getDashboardCoach(workspaceId: string, userId: string): Pr
   return res.json();
 }
 
+export async function getWorkspaceInsights(
+  workspaceId: string,
+  userId: string,
+  forceRefresh = false
+): Promise<WorkspaceInsight> {
+  const params = new URLSearchParams();
+  params.set("workspace_id", workspaceId);
+  params.set("user_id", userId);
+  if (forceRefresh) params.set("force_refresh", "true");
+  const res = await fetch(`${API_BASE}/workspace-ai/insights?${params.toString()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load AI coach insight");
+  }
+  return res.json();
+}
+
+export async function regenerateWorkspaceInsights(workspaceId: string, userId: string): Promise<WorkspaceInsight> {
+  const res = await fetch(`${API_BASE}/workspace-ai/insights/regenerate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_id: workspaceId, user_id: userId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to refresh AI coach insight");
+  }
+  return res.json();
+}
+
+export async function askWorkspaceQuestion(payload: {
+  workspace_id: string;
+  user_id: string;
+  question: string;
+  session_id?: string | null;
+}): Promise<WorkspaceChatTurn> {
+  const res = await fetch(`${API_BASE}/workspace-ai/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to ask workspace assistant");
+  }
+  return res.json();
+}
+
 export async function logout() {
   try {
     await fetch(`${API_BASE}/auth/logout`, { method: "POST" });
@@ -1518,6 +1599,18 @@ export async function updateWorkspace(workspaceId: string, name: string) {
     throw new Error(text || "Failed to rename workspace");
   }
   return res.json();
+}
+
+export async function deleteWorkspace(workspaceId: string, userId?: string | null) {
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId(userId));
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}?${params.toString()}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to delete workspace");
+  }
 }
 
 export async function getWorkspaceMembers(workspaceId: string, userId?: string | null): Promise<WorkspaceMember[]> {

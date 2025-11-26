@@ -17,6 +17,7 @@ from backend import templates
 from backend import project_members
 from backend import builder
 from backend import dashboard
+from backend import workspace_ai
 from backend import tasks
 from backend import tasks_ai
 from backend.rbac import ensure_membership, ensure_project_access
@@ -220,6 +221,7 @@ app.include_router(tasks.task_router)
 app.include_router(tasks_ai.router)
 app.include_router(project_members.router)
 app.include_router(templates.router)
+app.include_router(workspace_ai.router)
 app.include_router(workspaces_router)
 app.include_router(user_workspaces_router)
 app.include_router(auth.router)
