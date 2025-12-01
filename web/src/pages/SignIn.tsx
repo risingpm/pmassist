@@ -73,7 +73,7 @@ export default function SignInPage() {
       if (agent) {
         setStoredAgentProfile({ name: agent.name || DEFAULT_AGENT_NAME });
         if (workspaceId) {
-          navigate(`/workspaces/${workspaceId}/dashboard`, { replace: true });
+          navigate(`/workspaces/${workspaceId}/projects`, { replace: true });
         } else {
           navigate("/onboarding", { replace: true });
         }

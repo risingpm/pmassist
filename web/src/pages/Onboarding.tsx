@@ -416,7 +416,7 @@ export default function OnboardingPage() {
       setStoredAgentProfile({ name: agent.name || DEFAULT_AGENT_NAME });
 
       const targetWorkspace = resultingWorkspaceId || window.sessionStorage.getItem(WORKSPACE_ID_KEY);
-      const nextUrl = targetWorkspace ? `/workspaces/${targetWorkspace}/dashboard` : "/onboarding";
+      const nextUrl = targetWorkspace ? `/workspaces/${targetWorkspace}/projects` : "/onboarding";
       navigate(nextUrl, { replace: true, state: { onboardingComplete: true } });
     } catch (err: any) {
       console.error("Failed to save agent", err);
