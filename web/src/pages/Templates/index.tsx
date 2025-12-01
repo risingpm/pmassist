@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
 import {
   listTemplates,
@@ -16,9 +16,9 @@ import { useUserRole } from "../../context/RoleContext";
 import TemplateTagsFilter from "../../components/templates/TemplateTagsFilter";
 import CreateTemplateModal from "../../components/templates/CreateTemplateModal";
 import TemplatePreviewModal from "../../components/templates/TemplatePreviewModal";
+import WorkspaceBackLinks from "../../components/WorkspaceBackLinks";
 
 export default function TemplateLibraryPage() {
-  const navigate = useNavigate();
   const { workspaceId: routeWorkspaceId } = useParams<{ workspaceId?: string }>();
   const { workspaceRole } = useUserRole();
   const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
@@ -50,6 +50,20 @@ export default function TemplateLibraryPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDetail | TemplateRecord | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const editingInitialValues = useMemo(() => {
+    if (!editingTemplate) return undefined;
+    const latestVersion = editingTemplate.latest_version;
+    return {
+      title: editingTemplate.title,
+      description: editingTemplate.description ?? "",
+      category: editingTemplate.category ?? "",
+      visibility: editingTemplate.visibility,
+      tags: editingTemplate.tags ?? [],
+      content: latestVersion?.content ?? "",
+      content_format: latestVersion?.content_format ?? "markdown",
+      metadata: latestVersion?.metadata ?? null,
+    };
+  }, [editingTemplate]);
   useEffect(() => {
     if (!workspaceId) {
       setError("Select a workspace to manage templates.");
@@ -131,6 +145,12 @@ export default function TemplateLibraryPage() {
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-8">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
+        <WorkspaceBackLinks
+          links={[
+            { to: workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects", label: "Back to workspace" },
+            { to: workspaceId ? `/workspaces/${workspaceId}/dashboard` : "/dashboard", label: "Back to dashboard" },
+          ]}
+        />
         <div className="flex flex-col gap-2 border-b border-slate-200 pb-4">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Template Library</p>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -294,31 +314,13 @@ export default function TemplateLibraryPage() {
             </table>
           </div>
         )}
-        {workspaceId && (
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => navigate(`/workspaces/${workspaceId}/projects`)}
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
-            >
-              ← Back to workspace
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate(`/workspaces/${workspaceId}/dashboard`)}
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
-            >
-              ← Back to dashboard
-            </button>
-          </div>
-        )}
       </div>
 
       {modalOpen && (
         <CreateTemplateModal
           open={modalOpen}
           mode={editingTemplate ? "edit" : "create"}
-          initialValues={editingTemplate ?? undefined}
+          initialValues={editingInitialValues}
           onClose={() => setModalOpen(false)}
           onSave={async (values) => {
             if (editingTemplate) {
@@ -332,16 +334,16 @@ export default function TemplateLibraryPage() {
 
       <TemplatePreviewModal
         open={previewOpen}
-        template={previewTemplate}
-        loading={previewLoading}
-        canEdit={canEdit}
-        onClose={closePreview}
-        onUse={handleUse}
-        onEdit={(template) => {
-          closePreview();
-          setEditingTemplate(template);
-          setModalOpen(true);
-        }}
+          template={previewTemplate}
+          loading={previewLoading}
+          canEdit={canEdit}
+          onClose={closePreview}
+          onUse={handleUse}
+          onEdit={(template) => {
+            closePreview();
+            setEditingTemplate(template);
+            setModalOpen(true);
+          }}
         onDelete={(template) => {
           closePreview();
           handleDeleteTemplate(template);

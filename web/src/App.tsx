@@ -29,7 +29,7 @@ function RootRedirect() {
     if (hasUser) {
       const storedWorkspace = window.sessionStorage.getItem(WORKSPACE_ID_KEY);
       if (storedWorkspace) {
-        navigate(`/workspaces/${storedWorkspace}/dashboard`, { replace: true });
+        navigate(`/workspaces/${storedWorkspace}/projects`, { replace: true });
         return;
       }
       navigate("/onboarding", { replace: true });
@@ -86,7 +86,7 @@ export default function App() {
         <Route path="/templates" element={<WorkspaceRouteRedirect segment="templates" />} />
         <Route path="/settings" element={<WorkspaceRouteRedirect segment="settings" />} />
         <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
-          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route index element={<Navigate to="projects" replace />} />
           <Route path="dashboard" element={<WorkspaceDashboard />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/knowledge" element={<ProjectsPage />} />
