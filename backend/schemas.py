@@ -812,7 +812,7 @@ class WorkspaceMemory(BaseModel):
     workspace_id: UUID
     content: str
     source: str
-    metadata: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = Field(alias="context_metadata", default=None)
     tags: list[str] = Field(default_factory=list)
     importance: float | None = None
     pinned: bool
@@ -821,6 +821,7 @@ class WorkspaceMemory(BaseModel):
 
     class Config:
         from_attributes = True
+        allow_population_by_field_name = True
     force_refresh: bool = False
 
 

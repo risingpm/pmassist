@@ -47,7 +47,7 @@ def remember_workspace_event(
         workspace_id=workspace_id,
         content=text,
         source=source or "manual",
-        metadata=metadata or None,
+        context_metadata=metadata or None,
         tags=tags or [],
         importance=importance,
         created_by=user_id,

@@ -215,7 +215,7 @@ class WorkspaceMemory(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     source = Column(String, nullable=False, default="manual")
-    metadata = Column(JSONB, nullable=True)
+    context_metadata = Column("metadata", JSONB, nullable=True)
     tags = Column(ARRAY(String), default=list)
     importance = Column(Float, nullable=True)
     pinned = Column(Boolean, nullable=False, default=False)
