@@ -93,6 +93,12 @@ export type AuthResponse = {
   workspace_role?: WorkspaceRole | null;
 };
 
+export type AuthInitializeResponse = {
+  workspace_id: string;
+  project_id?: string | null;
+  has_demo: boolean;
+};
+
 export type ForgotPasswordResponse = {
   reset_token: string;
   expires_at: string;
@@ -103,6 +109,7 @@ export type KnowledgeBaseContextItem = {
   title: string;
   type: KnowledgeBaseEntryType;
   snippet: string;
+  marker?: string | null;
 };
 
 export type TemplateVisibility = "private" | "shared" | "system";
@@ -256,7 +263,69 @@ export type PRDRecord = {
   created_at: string;
   updated_at: string;
   workspace_id?: string | null;
+  created_by?: string | null;
   context_entries?: KnowledgeBaseContextItem[] | null;
+  verification?: VerificationDetails | null;
+};
+
+export type PRDVersionSummary = {
+  id: string;
+  version: number;
+  feature_name?: string | null;
+  is_active: boolean;
+  created_at: string;
+  created_by?: string | null;
+  author_name?: string | null;
+  decision_count: number;
+};
+
+export type PRDDiffRow = {
+  type: "equal" | "insert" | "delete" | "replace";
+  left_line?: string | null;
+  right_line?: string | null;
+  left_number?: number | null;
+  right_number?: number | null;
+};
+
+export type PRDDiffResponse = {
+  version_a: number;
+  version_b: number;
+  prd_a_id?: string | null;
+  prd_b_id?: string | null;
+  diff: PRDDiffRow[];
+};
+
+export type PRDDecisionNote = {
+  id: string;
+  prd_id: string;
+  project_id: string;
+  workspace_id: string;
+  version: number;
+  decision: string;
+  rationale?: string | null;
+  created_by?: string | null;
+  author_name?: string | null;
+  created_at: string;
+};
+
+export type PRDDecisionNotePayload = {
+  decision: string;
+  rationale?: string | null;
+  version?: number | null;
+};
+
+export type PRDQARequest = {
+  question: string;
+  prd_id?: string | null;
+  version_a?: number | null;
+  version_b?: number | null;
+};
+
+export type PRDQAResponse = {
+  answer: string;
+  context_entries: KnowledgeBaseContextItem[];
+  used_versions: number[];
+  verification?: VerificationDetails | null;
 };
 
 export type RoadmapGenerateResponse = {
@@ -266,6 +335,123 @@ export type RoadmapGenerateResponse = {
   action: "ask_followup" | "present_roadmap";
   suggestions?: string[] | null;
   context_entries?: KnowledgeBaseContextItem[] | null;
+  kb_entry_id?: string | null;
+  verification?: VerificationDetails | null;
+};
+
+export type RoadmapLinkedTask = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  assignee_id?: string | null;
+  due_date?: string | null;
+  project_id?: string | null;
+};
+
+export type RoadmapMilestone = {
+  id: string;
+  phase_id: string;
+  title: string;
+  description?: string | null;
+  due_date?: string | null;
+  status: string;
+  order_index: number;
+  progress_percent: number;
+  linked_tasks: RoadmapLinkedTask[];
+  ai_summary?: string | null;
+};
+
+export type RoadmapPhase = {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  order_index: number;
+  start_date?: string | null;
+  due_date?: string | null;
+  progress_percent: number;
+  milestones: RoadmapMilestone[];
+};
+
+export type RoadmapPhasePayload = {
+  title: string;
+  description?: string | null;
+  order_index?: number | null;
+  start_date?: string | null;
+  due_date?: string | null;
+  status?: string | null;
+};
+
+export type RoadmapMilestonePayload = {
+  title: string;
+  description?: string | null;
+  due_date?: string | null;
+  status?: string | null;
+  order_index?: number | null;
+};
+
+export type RoadmapProgressMilestone = {
+  id: string;
+  title: string;
+  progress_percent: number;
+  total_tasks: number;
+  completed_tasks: number;
+};
+
+export type RoadmapProgressPhase = {
+  phase_id: string;
+  title: string;
+  progress_percent: number;
+  total_tasks: number;
+  completed_tasks: number;
+  milestones: RoadmapProgressMilestone[];
+};
+
+export type RoadmapProgress = {
+  project_id: string;
+  phases: RoadmapProgressPhase[];
+  overall_progress: number;
+  total_tasks: number;
+  completed_tasks: number;
+};
+
+export type RoadmapRetrospective = {
+  phase_id: string;
+  summary: string;
+  went_well: string[];
+  needs_improvement: string[];
+  lessons: string[];
+  generated_at: string;
+};
+
+export type RoadmapAIUpdateItem = {
+  milestone_id: string;
+  phase_id?: string | null;
+  order_index?: number | null;
+  due_date?: string | null;
+  status?: string | null;
+};
+
+export type RoadmapReprioritizeSuggestion = {
+  suggestion_id: string;
+  title: string;
+  summary: string;
+  impact?: string | null;
+  milestone_id?: string | null;
+  recommended_phase_id?: string | null;
+  recommended_order_index?: number | null;
+  recommended_status?: string | null;
+  updates: RoadmapAIUpdateItem[];
+};
+
+export type RoadmapExecutionInsights = {
+  project_id: string;
+  overall_progress: number;
+  phase_summaries: RoadmapProgressPhase[];
+  blockers: string[];
+  velocity_last_7_days: number;
+  ai_summary: string;
+  suggestions: RoadmapReprioritizeSuggestion[];
 };
 
 export type ProjectComment = {
@@ -457,15 +643,19 @@ export type WorkspaceInvitation = {
 export type WorkspaceAIProviderStatus = {
   provider: "openai";
   is_enabled: boolean;
+  has_api_key: boolean;
+  masked_key_preview?: string | null;
+  key_suffix?: string | null;
   updated_at?: string | null;
   updated_by?: string | null;
 };
 
 export type WorkspaceAIProviderPayload = {
-  api_key: string;
+  api_key?: string | null;
   organization?: string | null;
   project?: string | null;
   user_id?: string | null;
+  use_saved_key?: boolean;
 };
 
 export type GitHubProjectContext = {
@@ -491,6 +681,7 @@ export type RoadmapChatTurnResponse = RoadmapChatSession & {
   action: "ask_followup" | "present_roadmap";
   suggestions?: string[] | null;
   kb_entry_id?: string | null;
+  verification?: VerificationDetails | null;
 };
 
 export type BuilderChatResponse = {
@@ -565,12 +756,52 @@ export type DashboardCoach = {
   confidence: number;
 };
 
+export type StrategicPillar = {
+  id: string;
+  title: string;
+  description?: string | null;
+  progress_percent: number;
+  related_prds: Array<{ id?: string; title?: string }>;
+  related_roadmaps: Array<{ id?: string; title?: string }>;
+  related_tasks: Array<{ id?: string; title?: string; status?: string }>;
+};
+
+export type StrategicInsight = {
+  id: string;
+  title: string;
+  description: string;
+  severity?: string | null;
+  source_type?: string | null;
+  source_id?: string | null;
+  suggested_action?: string | null;
+  impact_score?: number | null;
+};
+
+export type StrategySummary = {
+  narrative: string;
+  focus_areas: string[];
+  forecast: string;
+  health_score?: number | null;
+};
+
+export type StrategyOverview = {
+  pillars: StrategicPillar[];
+  insights: StrategicInsight[];
+  summary: StrategySummary;
+  updated_at: string;
+};
+
 export type WorkspaceRecommendation = {
   title: string;
   description: string;
   severity?: "info" | "opportunity" | "warning" | "risk" | null;
   related_entry_id?: string | null;
   related_entry_title?: string | null;
+};
+
+export type VerificationDetails = {
+  status: "passed" | "failed" | "skipped" | "declined";
+  message: string;
 };
 
 export type WorkspaceInsight = {
@@ -582,6 +813,7 @@ export type WorkspaceInsight = {
   metrics: DashboardOverview;
   context_entries: KnowledgeBaseContextItem[];
   generated_at: string;
+  verification?: VerificationDetails | null;
 };
 
 export type WorkspaceChatMessage = {
@@ -596,6 +828,7 @@ export type WorkspaceChatTurn = {
   messages: WorkspaceChatMessage[];
   context_entries: KnowledgeBaseContextItem[];
   updated_at: string;
+  verification?: VerificationDetails | null;
 };
 
 export async function startGitHubAuth(workspaceId: string, userId: string, redirectOverride?: string) {
@@ -688,8 +921,8 @@ export async function unlinkProjectGitHubRepo(projectId: string, workspaceId: st
 }
 
 // ---------------- Projects ----------------
-export async function getProjects(workspaceId: string) {
-  const res = await fetch(workspaceUrl(`${API_BASE}/projects`, workspaceId));
+export async function getProjects(workspaceId: string, userId?: string | null) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects`, workspaceId, userId));
   if (!res.ok) throw new Error("Failed to fetch projects");
   return res.json();
 }
@@ -749,6 +982,188 @@ export async function deleteProject(id: string, workspaceId: string) {
 export async function fetchRoadmap(projectId: string, workspaceId: string) {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch roadmap");
+  return res.json();
+}
+
+export async function getRoadmapPhases(projectId: string, workspaceId: string): Promise<RoadmapPhase[]> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/phases`, workspaceId));
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load roadmap phases");
+  }
+  return res.json();
+}
+
+export async function createRoadmapPhase(projectId: string, workspaceId: string, payload: RoadmapPhasePayload) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/phases`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to create phase");
+  return res.json() as Promise<RoadmapPhase>;
+}
+
+export async function updateRoadmapPhase(
+  projectId: string,
+  phaseId: string,
+  workspaceId: string,
+  payload: Partial<RoadmapPhasePayload>
+) {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/phases/${phaseId}`, workspaceId),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to update phase");
+  return res.json() as Promise<RoadmapPhase>;
+}
+
+export async function deleteRoadmapPhase(projectId: string, phaseId: string, workspaceId: string) {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/phases/${phaseId}`, workspaceId),
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error("Failed to delete phase");
+}
+
+export async function createRoadmapMilestone(
+  projectId: string,
+  phaseId: string,
+  workspaceId: string,
+  payload: RoadmapMilestonePayload
+) {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/phases/${phaseId}/milestones`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to create milestone");
+  return res.json() as Promise<RoadmapMilestone>;
+}
+
+export async function updateRoadmapMilestone(
+  projectId: string,
+  milestoneId: string,
+  workspaceId: string,
+  payload: Partial<RoadmapMilestonePayload> & { ai_summary?: string | null }
+) {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/milestones/${milestoneId}`, workspaceId),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to update milestone");
+  return res.json() as Promise<RoadmapMilestone>;
+}
+
+export async function deleteRoadmapMilestone(projectId: string, milestoneId: string, workspaceId: string) {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/milestones/${milestoneId}`, workspaceId),
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error("Failed to delete milestone");
+}
+
+export async function linkMilestoneTask(
+  projectId: string,
+  milestoneId: string,
+  workspaceId: string,
+  taskId: string,
+  action: "link" | "unlink" = "link"
+): Promise<RoadmapMilestone> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/milestones/${milestoneId}/link-task`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task_id: taskId, action }),
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to update milestone tasks");
+  }
+  return res.json();
+}
+
+export async function getRoadmapProgress(projectId: string, workspaceId: string): Promise<RoadmapProgress> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/progress`, workspaceId));
+  if (!res.ok) throw new Error("Failed to load roadmap progress");
+  return res.json();
+}
+
+export async function generatePhaseFeedback(
+  projectId: string,
+  phaseId: string,
+  workspaceId: string
+): Promise<RoadmapRetrospective> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/phases/${phaseId}/feedback`, workspaceId),
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to generate retrospective");
+  }
+  return res.json();
+}
+
+export async function getRoadmapSuggestions(
+  projectId: string,
+  workspaceId: string
+): Promise<RoadmapReprioritizeSuggestion[]> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/reprioritize`, workspaceId),
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load suggestions");
+  }
+  return res.json();
+}
+
+export async function applyRoadmapAIUpdates(
+  projectId: string,
+  workspaceId: string,
+  updates: RoadmapAIUpdateItem[]
+): Promise<RoadmapMilestone[]> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/apply-ai-updates`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to apply AI updates");
+  }
+  return res.json();
+}
+
+export async function getExecutionInsights(
+  projectId: string,
+  workspaceId: string
+): Promise<RoadmapExecutionInsights> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap/execution-insights`, workspaceId)
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load execution insights");
+  }
   return res.json();
 }
 
@@ -1027,6 +1442,123 @@ export async function refinePrd(
     body: JSON.stringify({ instructions })
   });
   if (!res.ok) throw new Error("Failed to refine PRD");
+  return res.json();
+}
+
+export async function savePrdVersion(
+  projectId: string,
+  prdId: string,
+  workspaceId: string,
+  payload: { content: string; feature_name?: string | null; description?: string | null }
+): Promise<PRDRecord> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/save`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to save PRD version");
+  }
+  return res.json();
+}
+
+export async function getPrdHistory(projectId: string, workspaceId: string): Promise<PRDVersionSummary[]> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds/history`, workspaceId));
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load PRD history");
+  }
+  return res.json();
+}
+
+export async function comparePrdVersions(
+  projectId: string,
+  workspaceId: string,
+  v1: number,
+  v2: number
+): Promise<PRDDiffResponse> {
+  const extra = { v1: String(v1), v2: String(v2) };
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prds/compare`, workspaceId, undefined, extra)
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to compare PRDs");
+  }
+  return res.json();
+}
+
+export async function askPrdQuestion(
+  projectId: string,
+  workspaceId: string,
+  payload: PRDQARequest
+): Promise<PRDQAResponse> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds/qa`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "PRD assistant unavailable");
+  }
+  return res.json();
+}
+
+export async function listDecisionNotes(
+  projectId: string,
+  prdId: string,
+  workspaceId: string,
+  version?: number
+): Promise<PRDDecisionNote[]> {
+  const extra = version !== undefined ? { version: String(version) } : undefined;
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/decisions`, workspaceId, undefined, extra)
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load decision notes");
+  }
+  return res.json();
+}
+
+export async function createDecisionNote(
+  projectId: string,
+  prdId: string,
+  workspaceId: string,
+  payload: PRDDecisionNotePayload
+): Promise<PRDDecisionNote> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/decisions`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to save decision note");
+  }
+  return res.json();
+}
+
+export async function rebuildPrdEmbeddings(
+  projectId: string,
+  workspaceId: string,
+  userId?: string | null
+): Promise<{ project_id: string; indexed_versions: number }> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/embeddings/rebuild/${projectId}`, workspaceId, userId), {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to rebuild PRD embeddings");
+  }
   return res.json();
 }
 
@@ -1478,6 +2010,19 @@ export async function loginWithGoogle(credential: string): Promise<AuthResponse>
   return res.json();
 }
 
+export async function initializeWorkspace(userId: string): Promise<AuthInitializeResponse> {
+  const res = await fetch(`${API_BASE}/auth/initialize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to initialize workspace");
+  }
+  return res.json();
+}
+
 export async function getDashboardOverview(workspaceId: string, userId: string): Promise<DashboardOverview> {
   const query = buildWorkspaceQuery(workspaceId, userId);
   const res = await fetch(`${API_BASE}/dashboard/overview?${query}`);
@@ -1516,6 +2061,52 @@ export async function getWorkspaceInsights(
     throw new Error(text || "Failed to load AI coach insight");
   }
   return res.json();
+}
+
+export async function getStrategyOverview(
+  workspaceId: string,
+  projectId: string,
+  userId: string,
+  forceRefresh = false,
+  signal?: AbortSignal
+): Promise<StrategyOverview> {
+  const params = new URLSearchParams();
+  params.set("workspace_id", workspaceId);
+  params.set("user_id", resolveUserId(userId));
+  params.set("force_refresh", forceRefresh ? "true" : "false");
+  const res = await fetch(`${API_BASE}/strategy/projects/${projectId}?${params.toString()}`, { signal });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load strategy overview");
+  }
+  return res.json();
+}
+
+export async function regenerateStrategy(workspaceId: string, projectId: string, userId: string): Promise<StrategyOverview> {
+  const params = new URLSearchParams();
+  params.set("workspace_id", workspaceId);
+  params.set("user_id", resolveUserId(userId));
+  const res = await fetch(`${API_BASE}/strategy/projects/${projectId}/regenerate?${params.toString()}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to regenerate strategy");
+  }
+  return res.json();
+}
+
+export async function askStrategist(payload: { workspace_id: string; project_id: string; user_id: string; question: string }) {
+  const res = await fetch(`${API_BASE}/strategy/projects/${payload.project_id}/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Strategist is unavailable");
+  }
+  return res.json() as Promise<{ answer: string; context_used: Record<string, unknown> }>;
 }
 
 export async function regenerateWorkspaceInsights(workspaceId: string, userId: string): Promise<WorkspaceInsight> {
@@ -1567,8 +2158,8 @@ export type WorkspaceSummary = {
   role?: WorkspaceRole | null;
 };
 
-export async function getUserWorkspaces(userId: string): Promise<WorkspaceSummary[]> {
-  const res = await fetch(`${API_BASE}/users/${userId}/workspaces`);
+export async function getUserWorkspaces(userId: string, signal?: AbortSignal): Promise<WorkspaceSummary[]> {
+  const res = await fetch(`${API_BASE}/users/${userId}/workspaces`, { signal });
   if (!res.ok) throw new Error("Failed to fetch workspaces");
   return res.json();
 }
@@ -1633,10 +2224,11 @@ export async function getWorkspaceInvitations(
 function normalizeProviderPayload(payload: WorkspaceAIProviderPayload) {
   return {
     provider: "openai",
-    api_key: payload.api_key,
+    api_key: payload.api_key ?? undefined,
     organization: payload.organization,
     project: payload.project,
     user_id: resolveUserId(payload.user_id),
+    use_saved_key: Boolean(payload.use_saved_key),
   };
 }
 

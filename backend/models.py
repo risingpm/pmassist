@@ -80,6 +80,21 @@ class Workspace(Base):
         cascade="all, delete-orphan",
         order_by="WorkspaceAIChat.last_message_at.desc()",
     )
+    strategic_pillars = relationship(
+        "StrategicPillar",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    strategic_insights = relationship(
+        "StrategicInsight",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    strategic_snapshots = relationship(
+        "StrategicSnapshot",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
 
 
 class WorkspaceMember(Base):
@@ -222,6 +237,10 @@ class Project(Base):
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
     kb_entries = relationship("KnowledgeBaseEntry", back_populates="project")
     roadmap_chats = relationship("RoadmapChat", back_populates="project")
+    roadmap_phases = relationship("RoadmapPhase", back_populates="project", cascade="all, delete-orphan")
+    strategic_pillars = relationship("StrategicPillar", back_populates="project", cascade="all, delete-orphan")
+    strategic_insights = relationship("StrategicInsight", back_populates="project", cascade="all, delete-orphan")
+    strategic_snapshot = relationship("StrategicSnapshot", back_populates="project", cascade="all, delete-orphan", uselist=False)
 
 
 # ✅ Roadmap Model
@@ -237,6 +256,64 @@ class Roadmap(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
 
     project = relationship("Project", back_populates="roadmaps")
+
+
+class RoadmapPhase(Base):
+    __tablename__ = "roadmap_phases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    order_index = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=False, default="planned")
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="roadmap_phases")
+    workspace = relationship("Workspace")
+    milestones = relationship("RoadmapMilestone", back_populates="phase", cascade="all, delete-orphan")
+
+
+class RoadmapMilestone(Base):
+    __tablename__ = "roadmap_milestones"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    phase_id = Column(UUID(as_uuid=True), ForeignKey("roadmap_phases.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, nullable=False, default="planned")
+    order_index = Column(Integer, nullable=False, default=0)
+    ai_summary = Column(Text, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    phase = relationship("RoadmapPhase", back_populates="milestones")
+    workspace = relationship("Workspace")
+    task_links = relationship("RoadmapMilestoneTask", back_populates="milestone", cascade="all, delete-orphan")
+
+
+class RoadmapMilestoneTask(Base):
+    __tablename__ = "roadmap_milestone_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    milestone_id = Column(UUID(as_uuid=True), ForeignKey("roadmap_milestones.id", ondelete="CASCADE"), nullable=False)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    linked_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    linked_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    milestone = relationship("RoadmapMilestone", back_populates="task_links")
+    task = relationship("Task", back_populates="milestone_links")
 
 
 class RoadmapConversation(Base):
@@ -286,9 +363,49 @@ class PRD(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Relationship
     project = relationship("Project", back_populates="prds")
+    created_by_user = relationship("User")
+    decision_notes = relationship("PRDDecisionNote", back_populates="prd", cascade="all, delete-orphan")
+    embeddings = relationship("PRDEmbedding", back_populates="prd", cascade="all, delete-orphan")
+
+
+class PRDDecisionNote(Base):
+    __tablename__ = "prd_decision_notes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    prd_id = Column(UUID(as_uuid=True), ForeignKey("prds.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    decision = Column(Text, nullable=False)
+    rationale = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    prd = relationship("PRD", back_populates="decision_notes")
+    author = relationship("User")
+
+
+class PRDEmbedding(Base):
+    __tablename__ = "prd_embeddings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    prd_id = Column(UUID(as_uuid=True), ForeignKey("prds.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    chunk_index = Column(Integer, nullable=False, default=0)
+    chunk_type = Column(String, nullable=False, default="body")
+    chunk = Column(Text, nullable=False)
+    decision_note_id = Column(UUID(as_uuid=True), ForeignKey("prd_decision_notes.id", ondelete="CASCADE"), nullable=True)
+    embedding = Column(Vector)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    prd = relationship("PRD", back_populates="embeddings")
+    decision_note = relationship("PRDDecisionNote")
 
 
 
@@ -459,6 +576,7 @@ class Task(Base):
     assignee = relationship("User", foreign_keys=[assignee_id])
     creator = relationship("User", foreign_keys=[created_by])
     comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
+    milestone_links = relationship("RoadmapMilestoneTask", back_populates="task", cascade="all, delete-orphan")
 
 
 class TaskComment(Base):
@@ -565,3 +683,56 @@ class WorkspaceAIChat(Base):
 
     workspace = relationship("Workspace", back_populates="ai_chats")
     user = relationship("User")
+
+
+class StrategicPillar(Base):
+    __tablename__ = "strategic_pillars"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    progress_percent = Column(Float, nullable=False, default=0.0)
+    related_prds = Column(JSONB, nullable=True)
+    related_roadmaps = Column(JSONB, nullable=True)
+    related_tasks = Column(JSONB, nullable=True)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="strategic_pillars")
+    project = relationship("Project", back_populates="strategic_pillars")
+
+
+class StrategicInsight(Base):
+    __tablename__ = "strategic_insights"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    severity = Column(String, nullable=True)
+    source_type = Column(String, nullable=True)
+    source_id = Column(UUID(as_uuid=True), nullable=True)
+    suggested_action = Column(Text, nullable=True)
+    impact_score = Column(Float, nullable=True)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="strategic_insights")
+    project = relationship("Project", back_populates="strategic_insights")
+
+
+class StrategicSnapshot(Base):
+    __tablename__ = "strategic_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    summary = Column(Text, nullable=True)
+    focus_areas = Column(ARRAY(String), nullable=True)
+    forecast = Column(Text, nullable=True)
+    health_score = Column(Float, nullable=True)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="strategic_snapshots")
+    project = relationship("Project", back_populates="strategic_snapshot")

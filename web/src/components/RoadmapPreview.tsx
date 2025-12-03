@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import { SURFACE_CARD, SURFACE_MUTED, SECONDARY_BUTTON } from "../styles/theme";
 
 type RoadmapPreviewProps = {
   content?: string | null;
@@ -8,22 +9,18 @@ type RoadmapPreviewProps = {
 export default function RoadmapPreview({ content, onViewFull }: RoadmapPreviewProps) {
   if (!content) {
     return (
-      <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+      <div className={`${SURFACE_MUTED} border-dashed px-4 py-6 text-center text-sm text-slate-500`}>
         The roadmap preview will appear here after the assistant finalizes a draft.
       </div>
     );
   }
 
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className={`${SURFACE_CARD} p-4`}>
       <div className="flex items-center justify-between">
         <h3 className="text-base font-semibold text-slate-900">Roadmap preview</h3>
         {onViewFull && (
-          <button
-            type="button"
-            onClick={onViewFull}
-            className="text-sm font-semibold text-blue-600 transition hover:text-blue-700"
-          >
+          <button type="button" onClick={onViewFull} className={SECONDARY_BUTTON}>
             📄 View full roadmap
           </button>
         )}

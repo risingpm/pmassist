@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, Link, useParams } from "react-router-dom";
 
 import { getDashboardOverview, type DashboardOverview, type WorkspaceInsight } from "../../api";
-import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../../constants";
+import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, WIDE_PAGE_CONTAINER } from "../../constants";
 import AgentAvatar from "../../components/AgentAvatar";
 import useAgentName from "../../hooks/useAgentName";
 import useWorkspaceInsights from "../../hooks/useWorkspaceInsights";
-import AskWorkspaceDrawer from "../../components/AskWorkspaceDrawer";
+import { SURFACE_CARD, SECTION_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, BODY_SUBTLE } from "../../styles/theme";
 
 function useSessionUser() {
   return useMemo(() => {
@@ -98,6 +98,18 @@ export default function WorkspaceDashboard() {
     }
   };
 
+  const quickNavItems = useMemo(() => {
+    if (!workspaceId) return [];
+    return [
+      { label: "Dashboard", path: `/workspaces/${workspaceId}/dashboard`, active: false },
+      { label: "Insights", path: `/workspaces/${workspaceId}/insights`, active: true },
+      { label: "Projects", path: `/workspaces/${workspaceId}/projects`, active: false },
+      { label: "Knowledge", path: `/workspaces/${workspaceId}/knowledge`, active: false },
+      { label: "Members", path: `/workspaces/${workspaceId}/projects/members`, active: false },
+      { label: "Templates", path: `/workspaces/${workspaceId}/templates`, active: false },
+    ];
+  }, [workspaceId]);
+
   useEffect(() => {
     if (coachError) {
       setCoachStatus(null);
@@ -106,22 +118,15 @@ export default function WorkspaceDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        <div className="flex flex-col gap-4 pb-6 md:flex-row md:items-center md:justify-between">
+      <div className={`${WIDE_PAGE_CONTAINER} py-10`}>
+        <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-              Workspace overview
-            </p>
+            <p className={SECTION_LABEL}>Workspace overview</p>
             <h1 className="text-3xl font-semibold text-slate-900">{workspaceName} Dashboard</h1>
-            <p className="text-sm text-slate-500">
-              Monitor planning, execution, and AI insights across your product stack.
-            </p>
+            <p className={BODY_SUBTLE}>Monitor planning, execution, and AI insights across your product stack.</p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to={workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects"}
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
-            >
+          <div className="flex flex-wrap items-center gap-3">
+            <Link to={workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects"} className={SECONDARY_BUTTON}>
               View Projects
             </Link>
             <button
@@ -130,12 +135,29 @@ export default function WorkspaceDashboard() {
                 if (!workspaceId) return;
                 navigate(`/workspaces/${workspaceId}/projects`);
               }}
-              className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+              className={PRIMARY_BUTTON}
             >
               Open Kanban
             </button>
           </div>
-        </div>
+        </header>
+
+        {quickNavItems.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+            {quickNavItems.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => navigate(item.path)}
+                className={`rounded-full px-4 py-2 ${
+                  item.active ? "bg-slate-900 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-600">
@@ -166,7 +188,6 @@ export default function WorkspaceDashboard() {
                 <EmptyState message="No active PRDs yet. Generate one from the Projects view." />
               )}
             </DashboardCard>
-
             <DashboardCard title="Roadmap progress" loading={overviewLoading}>
               {overview ? (
                 <div>
@@ -296,6 +317,7 @@ export default function WorkspaceDashboard() {
                 <EmptyState message={`${agentName} will share insights once data is available.`} />
               )}
             </DashboardCard>
+
           </div>
         </div>
       </div>
@@ -308,7 +330,6 @@ export default function WorkspaceDashboard() {
           refreshing={regenerating}
         />
       )}
-      <AskWorkspaceDrawer workspaceId={workspaceId} userId={sessionUserId} agentName={agentName} />
     </div>
   );
 }
@@ -321,13 +342,11 @@ type DashboardCardProps = {
 
 function DashboardCard({ title, children, loading = false }: DashboardCardProps) {
   return (
-    <div className="rounded-[28px] border border-slate-100 bg-white p-6 shadow-sm">
+    <div className={`${SURFACE_CARD} p-6`}>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
       </div>
-      <div className="mt-4 text-sm text-slate-600">
-        {loading ? <Skeleton /> : children}
-      </div>
+      <div className={`mt-4 ${BODY_SUBTLE}`}>{loading ? <Skeleton /> : children}</div>
     </div>
   );
 }
@@ -343,7 +362,7 @@ function Skeleton() {
 }
 
 function EmptyState({ message }: { message: string }) {
-  return <p className="text-sm text-slate-400">{message}</p>;
+  return <p className={BODY_SUBTLE}>{message}</p>;
 }
 
 type CoachDrawerProps = {
@@ -355,36 +374,40 @@ type CoachDrawerProps = {
 };
 
 function CoachDrawer({ insight, agentName, onClose, onRefresh, refreshing }: CoachDrawerProps) {
+  const verification = insight.verification;
+  const verificationTone =
+    verification?.status === "passed"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : verification?.status === "failed"
+        ? "border-rose-200 bg-rose-50 text-rose-700"
+        : "border-amber-200 bg-amber-50 text-amber-700";
+
   return (
     <div className="fixed inset-0 z-40 flex justify-center bg-slate-900/40 backdrop-blur">
       <div className="mt-10 w-full max-w-3xl rounded-3xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">AI Coach</p>
+            <p className={SECTION_LABEL}>AI Coach</p>
             <h3 className="text-xl font-semibold text-slate-900">{agentName} insights</h3>
-            <p className="text-xs text-slate-400">Updated {new Date(insight.generated_at).toLocaleString()}</p>
+            <p className={BODY_SUBTLE}>Updated {new Date(insight.generated_at).toLocaleString()}</p>
           </div>
           <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={refreshing}
-              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+            <button type="button" onClick={onRefresh} disabled={refreshing} className={SECONDARY_BUTTON}>
               {refreshing ? "Refreshing..." : "Regenerate"}
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-            >
+            <button type="button" onClick={onClose} className={PRIMARY_BUTTON}>
               Close
             </button>
           </div>
         </div>
         <div className="grid gap-6 px-6 py-6 md:grid-cols-2">
           <section className="space-y-4">
-            <p className="text-sm text-slate-600">{insight.summary}</p>
+            {verification && (
+              <div className={`rounded-2xl border px-3 py-2 text-xs ${verificationTone}`}>
+                {verification.message}
+              </div>
+            )}
+            <p className={BODY_SUBTLE}>{insight.summary}</p>
             <div className="space-y-3">
               {insight.recommendations.map((item) => (
                 <div key={item.title} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -399,7 +422,7 @@ function CoachDrawer({ insight, agentName, onClose, onRefresh, refreshing }: Coa
             </div>
           </section>
           <section className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Context Used</p>
+            <p className={SECTION_LABEL}>Context Used</p>
             {insight.context_entries.length === 0 && (
               <p className="text-sm text-slate-500">No references captured for this insight.</p>
             )}

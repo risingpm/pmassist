@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { ProjectLink } from "../api";
+import { SURFACE_CARD, SURFACE_MUTED, SECTION_LABEL, PRIMARY_BUTTON, PILL_META, BODY_SUBTLE } from "../styles/theme";
 
 function isValidUrl(value: string): boolean {
   try {
@@ -91,20 +93,29 @@ export default function ProjectLinks({ links, isLoading, onCreate, onDelete }: P
     }
   };
 
+  const LinksSkeleton = ({ count = 4 }: { count?: number }) => (
+    <div className="mt-4 space-y-3">
+      {Array.from({ length: count }).map((_, idx) => (
+        <div key={idx} className={`${SURFACE_MUTED} animate-pulse p-4`}>
+          <div className="h-4 w-1/3 rounded-full bg-slate-200" />
+          <div className="mt-2 h-3 w-full rounded-full bg-slate-100" />
+          <div className="mt-2 h-3 w-2/3 rounded-full bg-slate-100" />
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <section className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-slate-900">Project Links</h2>
-          {links.length > 0 && (
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {linkCountLabel}
-            </span>
-          )}
+          <div>
+            <p className={SECTION_LABEL}>Project references</p>
+            <h2 className="text-xl font-semibold text-slate-900">Project Links</h2>
+          </div>
+          {links.length > 0 && <span className={PILL_META}>{linkCountLabel}</span>}
         </div>
-        <p className="mt-1 text-sm text-slate-500">
-          Collect design files, research docs, and other artifacts your team references often.
-        </p>
+        <p className={BODY_SUBTLE}>Collect design files, research docs, and other artifacts your team references often.</p>
 
         <form onSubmit={handleCreate} className="mt-4 space-y-3">
           <div className="grid gap-3 md:grid-cols-2">
@@ -160,62 +171,65 @@ export default function ProjectLinks({ links, isLoading, onCreate, onDelete }: P
             </div>
           </div>
           {createError && <p className="text-sm text-rose-500">{createError}</p>}
-          <button
-            type="submit"
-            disabled={pending}
-            className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-          >
+          <button type="submit" disabled={pending} className={PRIMARY_BUTTON}>
             {pending ? "Saving…" : "Add link"}
           </button>
         </form>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
         <h3 className="text-lg font-semibold text-slate-800">Saved links</h3>
         {isLoading ? (
-          <p className="mt-3 text-sm text-slate-500">Loading links…</p>
+          <LinksSkeleton />
         ) : links.length === 0 ? (
           <p className="mt-3 text-sm text-slate-500">No links yet. Add one above to keep your references handy.</p>
         ) : (
-          <ul className="mt-4 space-y-3">
-            {links.map((link) => (
-              <li
-                key={link.id}
-                className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-              >
-                <div>
-                  <a
-                    href={link.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 text-sm font-semibold text-blue-600 transition hover:text-blue-700"
-                  >
-                    {link.label}
-                  </a>
-                  {link.description && (
-                    <p className="mt-1 text-sm text-slate-600">{link.description}</p>
-                  )}
-                  <p className="mt-1 text-xs text-slate-400">Saved {new Date(link.created_at).toLocaleString()}</p>
-                  {link.tags && link.tags.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1 text-xs text-blue-600">
-                      {link.tags.map((tag) => (
-                        <span key={tag} className="rounded-full bg-blue-50 px-2 py-1">
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={() => handleDelete(link.id)}
-                  disabled={deletingId === link.id}
-                  className="text-xs font-semibold uppercase tracking-wide text-rose-600 transition hover:text-rose-700 disabled:opacity-60"
+          <AnimatePresence initial={false}>
+            <ul className="mt-4 space-y-3">
+              {links.map((link) => (
+                <motion.li
+                  key={link.id}
+                  layout
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.2 }}
+                  className={`${SURFACE_MUTED} flex flex-wrap items-start justify-between gap-3 p-4`}
                 >
-                  {deletingId === link.id ? "Removing…" : "Remove"}
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <div>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 text-sm font-semibold text-blue-600 transition hover:text-blue-700"
+                    >
+                      {link.label}
+                    </a>
+                    {link.description && (
+                      <p className="mt-1 text-sm text-slate-600">{link.description}</p>
+                    )}
+                    <p className="mt-1 text-xs text-slate-400">Saved {new Date(link.created_at).toLocaleString()}</p>
+                    {link.tags && link.tags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1 text-xs text-blue-600">
+                        {link.tags.map((tag) => (
+                          <span key={tag} className="rounded-full bg-blue-50 px-2 py-1">
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleDelete(link.id)}
+                    disabled={deletingId === link.id}
+                    className="text-xs font-semibold uppercase tracking-wide text-rose-600 transition hover:text-rose-700 disabled:opacity-60"
+                  >
+                    {deletingId === link.id ? "Removing…" : "Remove"}
+                  </button>
+                </motion.li>
+              ))}
+            </ul>
+          </AnimatePresence>
         )}
         {deleteError && <p className="mt-3 text-sm text-rose-500">{deleteError}</p>}
       </div>

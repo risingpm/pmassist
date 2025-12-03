@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { WorkspaceInvitation, WorkspaceMember, WorkspaceRole } from "../api";
 import RoleBadge from "./RoleBadge";
 import InviteMemberModal from "./InviteMemberModal";
+import { SURFACE_CARD, SURFACE_MUTED, SECTION_LABEL, PRIMARY_BUTTON, BODY_SUBTLE } from "../styles/theme";
 
 interface WorkspaceMembersPanelProps {
   workspaceName: string | null;
@@ -19,6 +20,17 @@ interface WorkspaceMembersPanelProps {
 }
 
 const ROLE_OPTIONS: WorkspaceRole[] = ["admin", "editor", "viewer"];
+
+const MembersSkeleton = ({ count = 5 }: { count?: number }) => (
+  <div className="space-y-3">
+    {Array.from({ length: count }).map((_, idx) => (
+      <div key={idx} className={`${SURFACE_MUTED} animate-pulse p-4`}>
+        <div className="h-4 w-1/4 rounded-full bg-slate-200" />
+        <div className="mt-2 h-3 w-full rounded-full bg-slate-100" />
+      </div>
+    ))}
+  </div>
+);
 
 export default function WorkspaceMembersPanel({
   workspaceName,
@@ -46,13 +58,12 @@ export default function WorkspaceMembersPanel({
 
   return (
     <section className="mt-8 space-y-6">
-      <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
         <div className="flex flex-col gap-3 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-3xl font-bold">Workspace members</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Manage who can access {workspaceName ?? "this workspace"}.
-            </p>
+            <p className={SECTION_LABEL}>Workspace access</p>
+            <h2 className="text-3xl font-semibold">Workspace members</h2>
+            <p className={BODY_SUBTLE}>Manage who can access {workspaceName ?? "this workspace"}.</p>
             {!canAdminWorkspace && (
               <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700">
                 403 · You have viewer access. Only admins can modify membership.
@@ -62,10 +73,7 @@ export default function WorkspaceMembersPanel({
           <div className="flex items-center gap-3">
             <RoleBadge role={workspaceRole} />
             {canAdminWorkspace && (
-              <button
-                onClick={() => setInviteOpen(true)}
-                className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
-              >
+              <button onClick={() => setInviteOpen(true)} className={PRIMARY_BUTTON}>
                 Invite member
               </button>
             )}
@@ -88,11 +96,9 @@ export default function WorkspaceMembersPanel({
         )}
 
         {loading ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-            Loading members...
-          </div>
+          <MembersSkeleton count={6} />
         ) : sortedMembers.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          <div className={`${SURFACE_MUTED} border-dashed p-8 text-center text-sm text-slate-500`}>
             No members found.
           </div>
         ) : (
@@ -154,7 +160,7 @@ export default function WorkspaceMembersPanel({
         )}
 
         {canAdminWorkspace && invitations.length > 0 && (
-          <div className="mt-8 rounded-2xl border border-dashed border-slate-200 p-4">
+          <div className={`${SURFACE_MUTED} border-dashed p-4`}>
             <p className="text-sm font-semibold text-slate-700">Pending invitations</p>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               {invitations.map((invite) => (

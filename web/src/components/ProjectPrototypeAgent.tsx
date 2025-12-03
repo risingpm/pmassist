@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from "react";
-import {
-  API_BASE,
-  type PrototypeSession,
-  type PrototypeAgentMessage,
-} from "../api";
+import { AnimatePresence, motion } from "framer-motion";
+import { API_BASE, type PrototypeSession, type PrototypeAgentMessage } from "../api";
+import { SURFACE_CARD, SECTION_LABEL, PRIMARY_BUTTON, BODY_SUBTLE } from "../styles/theme";
 
 function renderMessage(message: PrototypeAgentMessage) {
   const isAssistant = message.role === "assistant";
@@ -89,9 +87,10 @@ export default function ProjectPrototypeAgent({ session, loading, sending, error
 
   if (!session) {
     return (
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
+        <p className={SECTION_LABEL}>Prototype Agent</p>
         <h2 className="text-xl font-semibold text-slate-900">Prototype Agent</h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className={BODY_SUBTLE}>
           Chat with an AI product manager to iteratively build your prototype. Provide a starting brief to kick off the session.
         </p>
         <form onSubmit={handleStart} className="mt-4 space-y-3">
@@ -104,11 +103,7 @@ export default function ProjectPrototypeAgent({ session, loading, sending, error
           />
           {startError && <p className="text-sm text-rose-500">{startError}</p>}
           {error && <p className="text-sm text-rose-500">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-          >
+          <button type="submit" disabled={loading} className={PRIMARY_BUTTON}>
             {loading ? "Starting…" : "Start conversation"}
           </button>
         </form>
@@ -124,7 +119,7 @@ export default function ProjectPrototypeAgent({ session, loading, sending, error
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold text-slate-900">Prototype Agent</h2>
           {resolvedBundleUrl && (
@@ -160,13 +155,25 @@ export default function ProjectPrototypeAgent({ session, loading, sending, error
           </div>
         )}
 
-        <div className="mt-4 grid gap-3">
-          {sortedMessages.length === 0 ? (
-            <p className="text-sm text-slate-500">No messages yet. Share a prompt below to begin.</p>
-          ) : (
-            sortedMessages.map((message) => renderMessage(message))
-          )}
-        </div>
+        <AnimatePresence initial={false}>
+          <div className="mt-4 grid gap-3">
+            {sortedMessages.length === 0 ? (
+              <p className="text-sm text-slate-500">No messages yet. Share a prompt below to begin.</p>
+            ) : (
+              sortedMessages.map((message) => (
+                <motion.div
+                  key={message.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {renderMessage(message)}
+                </motion.div>
+              ))
+            )}
+          </div>
+        </AnimatePresence>
 
         <form onSubmit={handleSend} className="mt-4 space-y-3">
           <textarea

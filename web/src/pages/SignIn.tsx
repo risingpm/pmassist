@@ -1,9 +1,18 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { GoogleLogin, GoogleOAuthProvider, type CredentialResponse } from "@react-oauth/google";
 
-import { loginWithGoogle, getUserAgent, getUserWorkspaces, type AuthResponse } from "../api";
-import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, DEFAULT_AGENT_NAME } from "../constants";
+import { loginWithGoogle, getUserAgent, getUserWorkspaces, initializeWorkspace, type AuthResponse } from "../api";
+import {
+  AUTH_USER_KEY,
+  USER_ID_KEY,
+  WORKSPACE_ID_KEY,
+  WORKSPACE_NAME_KEY,
+  DEFAULT_AGENT_NAME,
+  DEMO_INITIALIZED_KEY,
+  DEMO_WORKSPACE_ID_KEY,
+  DEMO_PROJECT_ID_KEY,
+} from "../constants";
 import { setStoredAgentProfile } from "../utils/agentProfile";
 
 const extractErrorMessage = (value: unknown): string => {
@@ -41,6 +50,29 @@ export default function SignInPage() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ensureDemoInitialized = useCallback(
+    async (authResult: AuthResponse) => {
+      if (typeof window === "undefined" || !authResult.id) return null;
+      const alreadyInitialized = window.localStorage.getItem(DEMO_INITIALIZED_KEY) === "true";
+      if (alreadyInitialized) return null;
+      try {
+        const result = await initializeWorkspace(authResult.id);
+        window.localStorage.setItem(DEMO_INITIALIZED_KEY, "true");
+        window.localStorage.setItem(DEMO_WORKSPACE_ID_KEY, result.workspace_id);
+        if (result.project_id) {
+          window.localStorage.setItem(DEMO_PROJECT_ID_KEY, result.project_id);
+        }
+        if (!authResult.workspace_id && result.workspace_id) {
+          window.sessionStorage.setItem(WORKSPACE_ID_KEY, result.workspace_id);
+        }
+        return result;
+      } catch (err) {
+        console.warn("Failed to initialize demo workspace during sign-in", err);
+        return null;
+      }
+    },
+    []
+  );
 
   const persistSession = (authResult: AuthResponse, workspaceId: string | null, workspaceName: string | null) => {
     if (typeof window !== "undefined") {
@@ -54,6 +86,12 @@ export default function SignInPage() {
   const completeSignIn = async (authResult: AuthResponse) => {
     let workspaceId = authResult.workspace_id ?? null;
     let workspaceName = authResult.workspace_name ?? null;
+
+    const initResult = await ensureDemoInitialized(authResult);
+    if (initResult) {
+      workspaceId = workspaceId ?? initResult.workspace_id ?? null;
+      workspaceName = workspaceName ?? "Demo Workspace";
+    }
     if (!workspaceId) {
       try {
         const list = await getUserWorkspaces(authResult.id);

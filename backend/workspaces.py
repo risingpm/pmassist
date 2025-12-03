@@ -14,6 +14,7 @@ from backend.ai_providers import (
     delete_global_openai_credentials,
     get_global_openai_credential,
     test_openai_credentials,
+    decrypt_secret,
 )
 
 workspaces_router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -75,9 +76,24 @@ def _pending_invites_query(db: Session, workspace_id: UUID):
 def _serialize_ai_provider_status(
     record: models.TenantAICredential | None,
 ) -> schemas.WorkspaceAIProviderStatus:
+    has_key = False
+    masked_preview = None
+    suffix = None
+    if record:
+        try:
+            decrypted = decrypt_secret(record.api_key_encrypted)
+        except RuntimeError:
+            decrypted = None
+        if decrypted:
+            has_key = True
+            suffix = decrypted[-2:]
+            masked_preview = f"{'*' * max(len(decrypted) - 2, 0)}{suffix}"
     return schemas.WorkspaceAIProviderStatus(
         provider="openai",
-        is_enabled=record is not None,
+        is_enabled=has_key,
+        has_api_key=has_key,
+        masked_key_preview=masked_preview,
+        key_suffix=suffix,
         updated_at=record.updated_at if record else None,
         updated_by=record.updated_by if record else None,
     )
@@ -333,8 +349,23 @@ def test_workspace_ai_provider(
     db: Session = Depends(get_db),
 ):
     ensure_membership(db, workspace_id, payload.user_id, required_role="admin")
+    api_key = payload.api_key.strip() if payload.api_key else None
+    organization = payload.organization
+    project = payload.project
+    if payload.use_saved_key:
+        record = get_global_openai_credential(db)
+        if not record:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No saved OpenAI key to test.")
+        try:
+            api_key = decrypt_secret(record.api_key_encrypted)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Saved OpenAI key is unreadable. Please save a new key.") from exc
+        organization = organization or record.organization
+        project = project or record.project
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide an OpenAI API key to test.")
     try:
-        test_openai_credentials(payload.api_key, organization=payload.organization, project=payload.project)
+        test_openai_credentials(api_key, organization=organization, project=project)
     except Exception as exc:  # pragma: no cover - network call
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unable to verify OpenAI credentials: {exc}") from exc
     return {"ok": True}

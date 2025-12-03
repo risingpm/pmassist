@@ -4,10 +4,12 @@ import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import OnboardingPage from "./pages/Onboarding";
 import ProjectsPage from "./pages/ProjectsPage";
 import WorkspaceDashboard from "./pages/Dashboard";
+import WorkspaceHome from "./pages/WorkspaceHome";
 import BuilderChatPage from "./pages/BuilderChat";
 import PrototypesPage from "./pages/Prototypes";
 import SettingsPage from "./pages/Settings";
 import TemplateLibraryPage from "./pages/Templates";
+import WorkspaceKnowledgePage from "./pages/WorkspaceKnowledge";
 import SignInPage from "./pages/SignIn";
 import ForgotPasswordPage from "./pages/ForgotPassword";
 import ResetPasswordPage from "./pages/ResetPassword";
@@ -29,7 +31,7 @@ function RootRedirect() {
     if (hasUser) {
       const storedWorkspace = window.sessionStorage.getItem(WORKSPACE_ID_KEY);
       if (storedWorkspace) {
-        navigate(`/workspaces/${storedWorkspace}/projects`, { replace: true });
+        navigate(`/workspaces/${storedWorkspace}/dashboard`, { replace: true });
         return;
       }
       navigate("/onboarding", { replace: true });
@@ -86,10 +88,12 @@ export default function App() {
         <Route path="/templates" element={<WorkspaceRouteRedirect segment="templates" />} />
         <Route path="/settings" element={<WorkspaceRouteRedirect segment="settings" />} />
         <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
-          <Route index element={<Navigate to="projects" replace />} />
-          <Route path="dashboard" element={<WorkspaceDashboard />} />
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<WorkspaceHome />} />
+          <Route path="insights" element={<WorkspaceDashboard />} />
           <Route path="projects" element={<ProjectsPage />} />
-          <Route path="projects/knowledge" element={<ProjectsPage />} />
+          <Route path="knowledge" element={<WorkspaceKnowledgePage />} />
+          <Route path="projects/knowledge" element={<WorkspaceKnowledgePage />} />
           <Route path="projects/members" element={<ProjectsPage />} />
           <Route path="projects/detail/:projectId" element={<ProjectsPage />} />
           <Route path="projects/detail/:projectId/:tab" element={<ProjectsPage />} />

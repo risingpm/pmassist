@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend import models
 
+DEFAULT_DEV_CREDENTIAL_SECRET = "pmassist-dev-secret"
 DEFAULT_OPENAI_KWARGS: dict[str, Any] = {}
 _env_api_key = os.getenv("OPENAI_API_KEY")
 if _env_api_key:
@@ -25,9 +26,7 @@ if _env_org:
 
 
 def _get_cipher() -> Fernet:
-    secret = os.getenv("AI_CREDENTIALS_SECRET") or os.getenv("APP_SECRET_KEY")
-    if not secret:
-        raise RuntimeError("AI_CREDENTIALS_SECRET or APP_SECRET_KEY must be set to store OpenAI keys securely.")
+    secret = os.getenv("AI_CREDENTIALS_SECRET") or os.getenv("APP_SECRET_KEY") or DEFAULT_DEV_CREDENTIAL_SECRET
     key = hashlib.sha256(secret.encode("utf-8")).digest()
     token = base64.urlsafe_b64encode(key)
     return Fernet(token)
@@ -96,9 +95,8 @@ def test_openai_credentials(api_key: str, *, organization: str | None = None, pr
     kwargs: dict[str, Any] = {"api_key": api_key.strip()}
     if organization:
         kwargs["organization"] = organization.strip()
-    # Project is stored for future compatibility but not passed to the SDK.
     client = OpenAI(**kwargs)
-    client.models.list(limit=1)
+    client.models.list()
 
 
 def upsert_workspace_openai_credentials(

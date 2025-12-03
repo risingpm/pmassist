@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
+from backend.ai_guardrails import DECLINE_PHRASE, bundle_context_entries, render_context_block, verify_citations, verify_from_items
 from backend.ai_providers import get_openai_client
 from backend.dashboard_service import collect_dashboard_metrics
 from backend.database import get_db
-from backend.knowledge_base_service import build_entry_content, get_relevant_entries
+from backend.knowledge_base_service import get_relevant_entries
+from backend.prd_service import search_prd_embeddings, build_prd_context_items
 from backend.rbac import ensure_membership
 
 router = APIRouter(prefix="/workspace-ai", tags=["workspace-ai"])
@@ -20,22 +21,6 @@ router = APIRouter(prefix="/workspace-ai", tags=["workspace-ai"])
 
 def _jsonable(model) -> dict:
     return json.loads(model.model_dump_json())
-
-
-def _context_from_entries(entries: List[models.KnowledgeBaseEntry]) -> list[schemas.KnowledgeBaseContextItem]:
-    items: list[schemas.KnowledgeBaseContextItem] = []
-    for entry in entries:
-        snippet = build_entry_content(entry, clip=240) or (entry.content or "")[:240]
-        snippet = (snippet or "").strip()
-        items.append(
-            schemas.KnowledgeBaseContextItem(
-                id=entry.id,
-                title=entry.title,
-                type=entry.type,  # type: ignore[arg-type]
-                snippet=snippet,
-            )
-        )
-    return items
 
 
 def _insight_to_schema(record: models.WorkspaceInsight) -> schemas.WorkspaceInsightResponse:
@@ -75,6 +60,11 @@ def _insight_to_schema(record: models.WorkspaceInsight) -> schemas.WorkspaceInsi
         except Exception:
             continue
 
+    verification = verify_from_items(
+        [record.summary] + [rec.description for rec in recommendations if rec.description],
+        context_entries,
+    )
+
     return schemas.WorkspaceInsightResponse(
         id=record.id,
         workspace_id=record.workspace_id,
@@ -84,13 +74,26 @@ def _insight_to_schema(record: models.WorkspaceInsight) -> schemas.WorkspaceInsi
         metrics=metrics_model,
         context_entries=context_entries,
         generated_at=record.generated_at,
+        verification=verification,
     )
+
+
+def _render_inline_context(items: list[schemas.KnowledgeBaseContextItem]) -> str:
+    if not items:
+        return ""
+    lines: list[str] = []
+    for item in items:
+        marker = item.marker or ""
+        prefix = f"[{marker}] " if marker else ""
+        lines.append(f"{prefix}{item.title} -> {item.snippet}")
+    return "\n".join(lines)
 
 
 def _generate_and_store_insight(db: Session, workspace_id: UUID, user_id: UUID) -> models.WorkspaceInsight:
     metrics = collect_dashboard_metrics(db, workspace_id)
     kb_entries = get_relevant_entries(db, workspace_id, "workspace roadmap health", top_n=4)
-    context_items = _context_from_entries(kb_entries)
+    context_bundle = bundle_context_entries(kb_entries)
+    context_items = [item.to_schema() for item in context_bundle]
 
     prd_lines = "\n".join(
         f"- {item.title} (status: {item.status}, updated {item.updated_at.strftime('%Y-%m-%d')})"
@@ -99,14 +102,13 @@ def _generate_and_store_insight(db: Session, workspace_id: UUID, user_id: UUID) 
     tasks = metrics["tasks"]
     roadmap = metrics["roadmap"]
     sprint = metrics["sprint"]
-    context_block = (
-        "\n".join(f"{item.title} [{item.type}]: {item.snippet}" for item in context_items) or "No knowledge base entries supplied."
-    )
+    context_block = render_context_block(context_bundle)
+    allowed_markers = {item.marker for item in context_items if item.marker}
 
     prompt = (
         "Act as an embedded AI product coach. Study the workspace metrics and knowledge context, then respond in strict JSON:\n"
-        '{"summary":"...", "recommendations":[{"title":"","description":"","severity":"info|opportunity|warning|risk","related_entry_title":""}], "confidence":0.0}. '
-        "Prioritize actionable, specific insights with references to context when possible.\n"
+        '{"summary":"...", "recommendations":[{"title":"","description":"","severity":"info|opportunity|warning|risk","related_entry_title":"","citations":["CTX1"]}], "confidence":0.0}. '
+        f"Each factual statement must cite at least one context marker such as [CTX1]. If the context does not contain an answer, reply with the exact phrase: {DECLINE_PHRASE}\n"
         f"Active PRDs:\n{prd_lines}\n\n"
         f"Roadmap: phase={roadmap.current_phase}, completion={roadmap.completion_percent}%, done={roadmap.done_tasks}/{roadmap.total_tasks}.\n"
         f"Tasks: total={tasks.total}, todo={tasks.todo}, in_progress={tasks.in_progress}, done={tasks.done}.\n"
@@ -124,6 +126,7 @@ def _generate_and_store_insight(db: Session, workspace_id: UUID, user_id: UUID) 
     ]
     confidence = 0.55
 
+    verification = schemas.VerificationDetails(status="skipped", message="No knowledge context was supplied.")
     try:
         client = get_openai_client(db, workspace_id)
         completion = client.chat.completions.create(
@@ -154,6 +157,15 @@ def _generate_and_store_insight(db: Session, workspace_id: UUID, user_id: UUID) 
         confidence = float(data.get("confidence") or confidence)
     except Exception:
         pass
+
+    verification = verify_citations(
+        [summary] + [rec["description"] for rec in recs if rec.get("description")],
+        allowed_markers,
+    )
+    if allowed_markers and verification.status == "failed":
+        summary = DECLINE_PHRASE
+        recs = []
+        confidence = 0.0
 
     overview = schemas.DashboardOverviewResponse(**metrics)
     metrics_payload = _jsonable(overview)
@@ -239,12 +251,17 @@ def _chat_response(session: models.WorkspaceAIChat, context_entries: list[schema
             last_answer = msg.content
             break
 
+    verification = None
+    if last_answer:
+        verification = verify_from_items([last_answer], context_entries)
+
     return schemas.WorkspaceChatTurnResponse(
         session_id=session.id,
         answer=last_answer,
         messages=messages,
         context_entries=context_entries,
         updated_at=session.last_message_at or session.created_at,
+        verification=verification,
     )
 
 
@@ -279,8 +296,27 @@ def ask_workspace(payload: schemas.WorkspaceChatTurnRequest, db: Session = Depen
     messages.append({"role": "user", "content": payload.question, "created_at": now.isoformat()})
 
     kb_entries = get_relevant_entries(db, payload.workspace_id, payload.question or "workspace summary", top_n=5)
-    context_items = _context_from_entries(kb_entries)
-    context_text = "\n".join(f"{item.title} [{item.type}]: {item.snippet}" for item in context_items) or "No direct references."
+    context_bundle = bundle_context_entries(kb_entries)
+    context_items = [item.to_schema() for item in context_bundle]
+    prd_records = search_prd_embeddings(
+        db,
+        payload.workspace_id,
+        None,
+        payload.question or "project knowledge",
+        limit=3,
+    )
+    prd_context_items = []
+    if prd_records:
+        prd_context_items = build_prd_context_items(prd_records, start_index=len(context_items) + 1)
+        context_items.extend(prd_context_items)
+    context_text = render_context_block(context_bundle)
+    if prd_context_items:
+        prd_text = _render_inline_context(prd_context_items)
+        if context_bundle:
+            context_text = "\n".join(block for block in [context_text, prd_text] if block)
+        else:
+            context_text = prd_text
+    allowed_markers = {item.marker for item in context_items if item.marker}
     metrics = collect_dashboard_metrics(db, payload.workspace_id)
     sprint = metrics["sprint"]
     metrics_text = (
@@ -291,6 +327,7 @@ def ask_workspace(payload: schemas.WorkspaceChatTurnRequest, db: Session = Depen
     conversation = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
     prompt_boost = (
         f"You are the Ask My Workspace assistant. Answer clearly with actionable details using only workspace context.\n"
+        f"Reference evidence using the exact marker syntax like [CTX1]. If the context does not contain the answer, reply with the exact phrase: {DECLINE_PHRASE}\n"
         f"Workspace metrics summary: {metrics_text}\n"
         f"Knowledge references:\n{context_text}\n"
         f"User question: {payload.question}"
@@ -302,11 +339,25 @@ def ask_workspace(payload: schemas.WorkspaceChatTurnRequest, db: Session = Depen
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0.2,
-            messages=[{"role": "system", "content": "You answer questions about this workspace succinctly and with context."}] + conversation[:-1] + [{"role": "user", "content": prompt_boost}],
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You answer questions about this workspace succinctly, only using provided metrics and knowledge snippets."
+                        f" Cite snippets using [CTX#]. If the context is insufficient, respond with the exact phrase '{DECLINE_PHRASE}'."
+                    ),
+                }
+            ]
+            + conversation[:-1]
+            + [{"role": "user", "content": prompt_boost}],
         )
         answer = completion.choices[0].message.content or answer
     except Exception:
         pass
+    verification = verify_citations([answer], allowed_markers)
+    if allowed_markers and verification.status == "failed":
+        answer = DECLINE_PHRASE
+        verification = schemas.VerificationDetails(status="failed", message="Assistant response could not be verified.")
 
     messages.append({"role": "assistant", "content": answer, "created_at": datetime.now(timezone.utc).isoformat()})
     session.messages = messages
@@ -315,4 +366,7 @@ def ask_workspace(payload: schemas.WorkspaceChatTurnRequest, db: Session = Depen
     db.commit()
     db.refresh(session)
 
-    return _chat_response(session, context_items)
+    response = _chat_response(session, context_items)
+    if verification:
+        response.verification = verification
+    return response

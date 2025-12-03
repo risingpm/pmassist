@@ -95,6 +95,7 @@ def _process_chat_turn(
         action=response.action,
         suggestions=response.suggestions,
         kb_entry_id=response.kb_entry_id or chat.output_entry_id,
+        verification=response.verification,
     )
 
 

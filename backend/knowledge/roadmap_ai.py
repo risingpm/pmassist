@@ -19,10 +19,11 @@ from backend.database import get_db
 from backend import models, schemas
 from backend.models import Project, Roadmap, RoadmapConversation, UserAgent
 from backend.rbac import ensure_project_access
-from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, build_entry_content
+from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries
 from backend.workspaces import get_project_in_workspace
 from backend.ai_providers import get_openai_client
 from backend.template_service import get_template_version
+from backend.ai_guardrails import DECLINE_PHRASE, bundle_context_entries, render_context_block, verify_citations
 
 DEFAULT_SUGGESTIONS = {
     "vision": [
@@ -91,7 +92,7 @@ def build_agent_prompt(agent: UserAgent | None) -> str | None:
     )
 
 
-def build_context_block(project: Project, kb_entries: list[models.KnowledgeBaseEntry]) -> str:
+def build_context_block(project: Project, knowledge_section: str) -> str:
     lines = [
         f"Project Title: {project.title}",
         f"Description: {project.description}",
@@ -101,13 +102,7 @@ def build_context_block(project: Project, kb_entries: list[models.KnowledgeBaseE
         "",
         "Knowledge Base Context:",
     ]
-    if kb_entries:
-        for entry in kb_entries:
-            snippet = build_entry_content(entry, clip=600)
-            label = entry.type.upper()
-            lines.append(f"- {label}: {entry.title}\n{snippet}")
-    else:
-        lines.append("- No knowledge base entries yet")
+    lines.append(knowledge_section or "No knowledge base entries yet")
     return "\n".join(lines)
 
 
@@ -154,21 +149,6 @@ def upsert_roadmap(db: Session, project: Project, content: str) -> Roadmap:
 router = APIRouter(prefix="/projects", tags=["roadmap"])
 
 
-def _context_items(entries: list[models.KnowledgeBaseEntry]) -> list[schemas.KnowledgeBaseContextItem]:
-    items: list[schemas.KnowledgeBaseContextItem] = []
-    for entry in entries:
-        snippet = build_entry_content(entry, clip=800) or entry.content or ""
-        items.append(
-            schemas.KnowledgeBaseContextItem(
-                id=entry.id,
-                title=entry.title,
-                type=entry.type,
-                snippet=snippet,
-            )
-        )
-    return items
-
-
 def _record_roadmap_entry(db: Session, workspace_id: UUID | None, project_id: UUID, user_id: UUID, content: str) -> models.KnowledgeBaseEntry | None:
     if not workspace_id:
         return None
@@ -211,8 +191,11 @@ def generate_roadmap_endpoint(
     query_terms.extend(msg.content for msg in history_messages if msg.role == "user")
     context_query = "\n".join(filter(None, query_terms))
     kb_entries = get_relevant_entries(db, project.workspace_id, context_query, top_n=5)
-    context_items = _context_items(kb_entries)
-    context_block = build_context_block(project, kb_entries)
+    context_bundle = bundle_context_entries(kb_entries)
+    context_items = [item.to_schema() for item in context_bundle]
+    knowledge_section = render_context_block(context_bundle)
+    context_block = build_context_block(project, knowledge_section)
+    allowed_markers = {item.marker for item in context_items if item.marker}
 
     prompt = (payload.prompt or "").strip()
     if not prompt and not history_messages:
@@ -233,9 +216,14 @@ def generate_roadmap_endpoint(
 
     system_message = SYSTEM_PROMPT if not agent_prompt else f"{agent_prompt}\n\n{SYSTEM_PROMPT}"
 
+    context_prompt = (
+        f"Project context:\n{context_block}\n\n"
+        f"Guidance:\n- Cite workspace knowledge using [CTX1] style markers from the context section.\n"
+        f"- If the knowledge does not answer the user's request, reply with the exact phrase \"{DECLINE_PHRASE}\"."
+    )
     openai_messages = [
         {"role": "system", "content": system_message},
-        {"role": "user", "content": f"Project context:\n{context_block}"},
+        {"role": "user", "content": context_prompt},
     ]
 
     if payload.template_id:
@@ -308,11 +296,21 @@ def generate_roadmap_endpoint(
         cleaned = [str(item) for item in suggestions_raw if isinstance(item, (str, int, float))]
         if cleaned:
             suggestions = cleaned[:4]
+    verification = schemas.VerificationDetails(status="skipped", message="Roadmap has not been generated yet.")
     if action == "present_roadmap":
         roadmap_markdown = data.get("roadmap_markdown", "").strip()
         if not roadmap_markdown:
             raise HTTPException(status_code=500, detail="Assistant did not include roadmap_markdown.")
         saved = upsert_roadmap(db, project, roadmap_markdown)
+        verification = verify_citations([assistant_message, roadmap_markdown], allowed_markers)
+        if allowed_markers and verification.status == "failed":
+            roadmap_markdown = None
+            action = "ask_followup"
+            assistant_message = DECLINE_PHRASE
+            suggestions = [
+                "Share more specifics from your planning docs.",
+                "Upload relevant PRDs or research to the knowledge base.",
+            ]
     else:
         roadmap_markdown = None
         if not suggestions:
@@ -342,6 +340,7 @@ def generate_roadmap_endpoint(
         suggestions=suggestions,
         context_entries=context_items,
         kb_entry_id=kb_entry_id,
+        verification=verification,
     )
 
 
