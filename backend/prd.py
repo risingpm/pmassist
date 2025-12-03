@@ -19,6 +19,7 @@ from backend.prd_service import (
     search_prd_embeddings,
     build_prd_context_items,
 )
+from backend.workspace_memory import remember_workspace_event
 
 from fastapi.responses import FileResponse
 from docx import Document as DocxDocument
@@ -61,6 +62,20 @@ def _record_prd_entry(db: Session, workspace_id: UUID | None, prd: models.PRD, u
     )
     db.add(entry)
     db.commit()
+    snippet = (prd.content or "")[:600]
+    remember_workspace_event(
+        db,
+        workspace_id,
+        content=f"PRD update for {prd.feature_name or 'PRD'} v{prd.version}:\n{snippet}",
+        source="prd",
+        metadata={
+            "project_id": str(prd.project_id),
+            "prd_id": str(prd.id),
+            "version": prd.version,
+        },
+        tags=["prd"],
+        user_id=user_id,
+    )
 
 
 def _render_prd_context_block(items: list[schemas.KnowledgeBaseContextItem]) -> str:

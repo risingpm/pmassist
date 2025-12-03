@@ -208,6 +208,24 @@ class KnowledgeBaseEntry(Base):
     roadmap_chats = relationship("RoadmapChat", back_populates="output_entry")
 
 
+class WorkspaceMemory(Base):
+    __tablename__ = "workspace_memories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    content = Column(Text, nullable=False)
+    source = Column(String, nullable=False, default="manual")
+    metadata = Column(JSONB, nullable=True)
+    tags = Column(ARRAY(String), default=list)
+    importance = Column(Float, nullable=True)
+    pinned = Column(Boolean, nullable=False, default=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    embedding = Column(Vector)
+
+    workspace = relationship("Workspace", backref="memory_entries")
+
+
 # ✅ Project Model
 class Project(Base):
     __tablename__ = "projects"

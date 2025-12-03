@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import KnowledgeBasePanel from "../components/KnowledgeBasePanel";
+import AIContextBuilder from "../components/AIContextBuilder";
 import { getProjects } from "../api";
 import type { WorkspaceRole } from "../api";
 import { USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, WIDE_PAGE_CONTAINER } from "../constants";
@@ -42,7 +43,7 @@ export default function WorkspaceKnowledgePage() {
     setLoadingProjects(true);
     getProjects(workspaceId)
       .then((data) => {
-        const mapped = (data.projects || []).map((project) => ({
+        const mapped = (data.projects || []).map((project: { id: string; title: string }) => ({
           id: project.id,
           label: project.title,
         }));
@@ -114,6 +115,8 @@ export default function WorkspaceKnowledgePage() {
         {projectError && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{projectError}</div>
         )}
+
+        {workspaceId && <AIContextBuilder workspaceId={workspaceId} />}
 
         <KnowledgeBasePanel
           workspaceId={workspaceId}

@@ -3,13 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import type { GitHubRepoRecord, GitHubWorkspaceContext, KnowledgeEntryRecord } from "../api";
 import { fetchUserRepos, getGitHubContext, startGitHubAuth, syncGitHubRepo } from "../api";
-import {
-  AUTH_USER_KEY,
-  USER_ID_KEY,
-  WORKSPACE_ID_KEY,
-  WORKSPACE_NAME_KEY,
-  WIDE_PAGE_CONTAINER,
-} from "../constants";
+import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WIDE_PAGE_CONTAINER } from "../constants";
 import { SECTION_LABEL, BODY_SUBTLE, PRIMARY_BUTTON, SECONDARY_BUTTON } from "../styles/theme";
 
 function formatDate(value?: string | null) {
@@ -234,7 +228,6 @@ export default function IntegrationsPage() {
   const location = useLocation();
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
   const [context, setContext] = useState<GitHubWorkspaceContext | null>(null);
@@ -253,10 +246,8 @@ export default function IntegrationsPage() {
       return;
     }
     const storedWorkspace = window.sessionStorage.getItem(WORKSPACE_ID_KEY);
-    const storedName = window.sessionStorage.getItem(WORKSPACE_NAME_KEY);
     const storedUser = window.sessionStorage.getItem(USER_ID_KEY);
     setWorkspaceId(storedWorkspace);
-    setWorkspaceName(storedName);
     setUserId(storedUser);
   }, [navigate]);
 

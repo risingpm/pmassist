@@ -25,9 +25,9 @@ import {
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, WIDE_PAGE_CONTAINER } from "../constants";
 import { useUserRole } from "../context/RoleContext";
 import { normalizeWorkspaceRole as normalizeWorkspaceRoleValue } from "../utils/roles";
-import { SURFACE_CARD, SECTION_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, ICON_BUTTON, PILL_META } from "../styles/theme";
+import { SECTION_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, PILL_META } from "../styles/theme";
 
-type PanelView = "projects" | "workspace-members" | "knowledge-base" | "templates";
+type PanelView = "projects" | "workspace-members" | "templates";
 type ProjectTabRoute = "knowledge" | "roadmap" | "prototypes" | "tasks" | "prd" | "members" | "strategy";
 
 type Project = {
@@ -249,8 +249,6 @@ export default function ProjectsPage() {
 
   const resolveWorkspacePath = useCallback((id: string, view: PanelView) => {
     switch (view) {
-      case "knowledge-base":
-        return `/workspaces/${id}/knowledge`;
       case "workspace-members":
         return `/workspaces/${id}/projects/members`;
       case "templates":
@@ -677,22 +675,14 @@ export default function ProjectsPage() {
                         Projects
                       </button>
                       <button
-                        onClick={() => handleWorkspaceNavigation(ws, "knowledge-base")}
-                        className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
-                          isActiveWorkspace && activeView === "knowledge-base"
-                            ? "bg-blue-50 text-blue-700"
-                            : "text-slate-500 hover:bg-slate-100"
-                        }`}
+                        onClick={() => navigate(`/workspaces/${ws.id}/knowledge`)}
+                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
                       >
                         Knowledge Base
                       </button>
                       <button
                         onClick={() => handleWorkspaceNavigation(ws, "templates")}
-                        className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
-                          isActiveWorkspace && activeView === "templates"
-                            ? "bg-blue-50 text-blue-700"
-                            : "text-slate-500 hover:bg-slate-100"
-                        }`}
+                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
                       >
                         Template Library
                       </button>

@@ -14,7 +14,7 @@ from .models import Project
 from . import prd, agent, auth, models
 from .workspaces import workspaces_router, user_workspaces_router
 from . import knowledge_base
-from backend import roadmap_chat, roadmap, roadmap_phases
+from backend import roadmap_chat, roadmap, roadmap_phases, workspace_memory
 from backend import templates
 from backend import project_members
 from backend import builder
@@ -221,6 +221,7 @@ app.include_router(knowledge_base.router)
 app.include_router(roadmap_chat.router)
 app.include_router(roadmap.router)
 app.include_router(roadmap_phases.router)
+app.include_router(workspace_memory.router)
 app.include_router(builder.router)
 app.include_router(dashboard.router)
 app.include_router(tasks.workspace_router)

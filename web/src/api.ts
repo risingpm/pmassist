@@ -816,6 +816,33 @@ export type WorkspaceInsight = {
   verification?: VerificationDetails | null;
 };
 
+export type WorkspaceMemory = {
+  id: string;
+  workspace_id: string;
+  content: string;
+  source: string;
+  metadata?: Record<string, any> | null;
+  tags: string[];
+  importance?: number | null;
+  pinned: boolean;
+  created_by?: string | null;
+  created_at: string;
+};
+
+export type WorkspaceMemoryCreatePayload = {
+  content: string;
+  source?: string;
+  metadata?: Record<string, any> | null;
+  tags?: string[];
+  importance?: number | null;
+};
+
+export type WorkspaceMemoryUpdatePayload = {
+  pinned?: boolean;
+  tags?: string[];
+  importance?: number | null;
+};
+
 export type WorkspaceChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -2118,6 +2145,62 @@ export async function regenerateWorkspaceInsights(workspaceId: string, userId: s
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to refresh AI coach insight");
+  }
+  return res.json();
+}
+
+export async function listWorkspaceMemory(
+  workspaceId: string,
+  params?: { query?: string; limit?: number }
+): Promise<WorkspaceMemory[]> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const extra: Record<string, string | undefined> = {};
+  if (params?.query) extra.query = params.query;
+  if (typeof params?.limit === "number") extra.limit = String(params.limit);
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/memory`, workspaceId, undefined, extra)
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load workspace memory");
+  }
+  return res.json();
+}
+
+export async function createWorkspaceMemory(
+  workspaceId: string,
+  payload: WorkspaceMemoryCreatePayload
+): Promise<WorkspaceMemory> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/memory`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to create workspace memory");
+  }
+  return res.json();
+}
+
+export async function updateWorkspaceMemory(
+  workspaceId: string,
+  memoryId: string,
+  payload: WorkspaceMemoryUpdatePayload
+): Promise<WorkspaceMemory> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/memory/${memoryId}`, workspaceId),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to update workspace memory");
   }
   return res.json();
 }

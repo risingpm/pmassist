@@ -10,6 +10,7 @@ from backend.database import get_db
 from backend.knowledge import roadmap_ai
 from backend.rbac import ensure_membership, ensure_project_access
 from backend.workspaces import get_project_in_workspace
+from backend.workspace_memory import remember_workspace_event
 
 router = APIRouter(prefix="/chat", tags=["roadmap-chat"])
 
@@ -87,7 +88,7 @@ def _process_chat_turn(
     db.refresh(chat)
 
     record = _serialize_chat(chat)
-    return schemas.RoadmapChatResponse(
+    response_payload = schemas.RoadmapChatResponse(
         **record.model_dump(),
         assistant_message=response.message,
         roadmap=response.roadmap,
@@ -97,6 +98,20 @@ def _process_chat_turn(
         kb_entry_id=response.kb_entry_id or chat.output_entry_id,
         verification=response.verification,
     )
+    if response.roadmap:
+        remember_workspace_event(
+            db,
+            payload.workspace_id,
+            content=f"Roadmap assistant update:\n{response.roadmap}",
+            source="roadmap_chat",
+            metadata={
+                "project_id": str(payload.project_id),
+                "chat_id": str(chat.id),
+            },
+            tags=["roadmap", "assistant"],
+            user_id=payload.user_id,
+        )
+    return response_payload
 
 
 @router.post("/roadmap", response_model=schemas.RoadmapChatResponse)

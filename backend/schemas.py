@@ -787,6 +787,40 @@ class WorkspaceInsightResponse(BaseModel):
 class WorkspaceInsightRegenerateRequest(BaseModel):
     workspace_id: UUID
     user_id: UUID
+
+
+class WorkspaceMemoryBase(BaseModel):
+    content: str
+    source: str = "manual"
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] | None = None
+    importance: float | None = None
+
+
+class WorkspaceMemoryCreate(WorkspaceMemoryBase):
+    pass
+
+
+class WorkspaceMemoryUpdate(BaseModel):
+    pinned: bool | None = None
+    tags: list[str] | None = None
+    importance: float | None = None
+
+
+class WorkspaceMemory(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    content: str
+    source: str
+    metadata: dict[str, Any] | None = None
+    tags: list[str] = Field(default_factory=list)
+    importance: float | None = None
+    pinned: bool
+    created_by: UUID | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
     force_refresh: bool = False
 
 
