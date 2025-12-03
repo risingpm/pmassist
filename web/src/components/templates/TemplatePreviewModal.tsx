@@ -1,4 +1,4 @@
-import TemplateDetail from "./TemplateDetail";
+import { TemplateDetail as TemplateDetailComponent } from "./TemplateDetail";
 import type { TemplateRecord, TemplateDetail as TemplateDetailType } from "../../api";
 
 export type TemplatePreviewModalProps = {
@@ -42,7 +42,7 @@ export default function TemplatePreviewModal({
       );
     }
     return (
-      <TemplateDetail
+      <TemplateDetailComponent
         template={template}
         loading={false}
         canEdit={canEdit}

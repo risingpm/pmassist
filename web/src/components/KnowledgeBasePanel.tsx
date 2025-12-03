@@ -17,6 +17,7 @@ import {
 import UploadEntryModal from "./UploadEntryModal";
 import useWorkspaceInsights from "../hooks/useWorkspaceInsights";
 import useAgentName from "../hooks/useAgentName";
+import { SURFACE_CARD, SURFACE_MUTED, SECTION_LABEL, PRIMARY_BUTTON, PILL_META, BODY_SUBTLE } from "../styles/theme";
 
 const TABS: Array<{ id: string; label: string; type?: KnowledgeBaseEntryType }> = [
   { id: "documents", label: "Documents", type: "document" },
@@ -44,6 +45,18 @@ interface KnowledgeBasePanelProps {
 }
 
 type ToastState = { type: "success" | "error"; message: string } | null;
+
+const SkeletonList = ({ count = 6 }: { count?: number }) => (
+  <div className="mt-6 space-y-3">
+    {Array.from({ length: count }).map((_, idx) => (
+      <div key={idx} className={`${SURFACE_MUTED} animate-pulse p-4`}>
+        <div className="h-4 w-1/3 rounded-full bg-slate-200" />
+        <div className="mt-2 h-3 w-full rounded-full bg-slate-100" />
+        <div className="mt-2 h-3 w-2/3 rounded-full bg-slate-100" />
+      </div>
+    ))}
+  </div>
+);
 
 export default function KnowledgeBasePanel({
   workspaceId,
@@ -191,9 +204,9 @@ export default function KnowledgeBasePanel({
 
   if (!workspaceId) {
     return (
-      <section className="mt-8 rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+      <section className={`${SURFACE_CARD} mt-8 p-6`}>
         <h2 className="text-2xl font-semibold text-slate-900">Knowledge Base</h2>
-        <p className="mt-2 text-sm text-slate-500">Select a workspace to load its knowledge base.</p>
+        <p className={BODY_SUBTLE}>Select a workspace to load its knowledge base.</p>
       </section>
     );
   }
@@ -204,6 +217,19 @@ export default function KnowledgeBasePanel({
         <div className="rounded-3xl border border-slate-900/10 bg-gradient-to-r from-slate-900 to-slate-800 p-6 text-white shadow-lg">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-300">AI Coach · {agentName}</p>
           <h3 className="mt-2 text-xl font-semibold">{coachInsight.summary}</h3>
+          {coachInsight.verification && (
+            <p
+              className={`mt-2 text-xs ${
+                coachInsight.verification.status === "passed"
+                  ? "text-emerald-200"
+                  : coachInsight.verification.status === "failed"
+                    ? "text-rose-200"
+                    : "text-amber-200"
+              }`}
+            >
+              {coachInsight.verification.message}
+            </p>
+          )}
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {coachInsight.recommendations.slice(0, 2).map((rec) => (
               <div key={rec.title} className="rounded-2xl bg-white/10 p-4">
@@ -220,22 +246,16 @@ export default function KnowledgeBasePanel({
           </p>
         </div>
       )}
-      <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
         <div className="flex flex-col gap-3 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-3xl font-bold text-slate-900">Knowledge Base</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Upload documents, insights, and research the AI can reason over.
-            </p>
-            {!canEdit && (
-              <p className="mt-2 text-xs text-amber-600">Viewer access cannot upload or delete entries.</p>
-            )}
+            <p className={SECTION_LABEL}>Workspace knowledge</p>
+            <h2 className="text-3xl font-semibold text-slate-900">Knowledge Base</h2>
+            <p className={BODY_SUBTLE}>Upload documents, insights, and research the AI can reason over.</p>
+            {!canEdit && <p className="mt-2 text-xs text-amber-600">Viewer access cannot upload or delete entries.</p>}
           </div>
           {canEdit && (
-            <button
-              onClick={() => setShowModal(true)}
-              className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
-            >
+            <button onClick={() => setShowModal(true)} className={PRIMARY_BUTTON}>
               Upload entry
             </button>
           )}
@@ -263,9 +283,7 @@ export default function KnowledgeBasePanel({
                   setTagFilter("");
                 }}
                 className={`rounded-full px-4 py-1 transition ${
-                  activeTab === tab.id
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  activeTab === tab.id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
               >
                 {tab.label}
@@ -317,31 +335,24 @@ export default function KnowledgeBasePanel({
         )}
 
         {loading ? (
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-            Loading entries…
-          </div>
+          <SkeletonList count={6} />
         ) : error ? (
           <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">
             {error}
           </div>
         ) : entries.length === 0 ? (
-          <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          <div className={`${SURFACE_MUTED} mt-6 border-dashed p-8 text-center text-sm text-slate-500`}>
             No entries match your filters. {canEdit ? "Upload a document to get started." : "Ask an editor to add context."}
           </div>
         ) : (
           <div className="mt-6 space-y-4">
             {entries.map((entry) => (
-              <article
-                key={entry.id}
-                className="rounded-3xl border border-slate-100 bg-white/60 p-5 shadow-[0_20px_40px_-32px_rgba(15,23,42,0.4)]"
-              >
+              <article key={entry.id} className={`${SURFACE_CARD} p-5`}>
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] uppercase tracking-wide">
-                        {TYPE_LABELS[entry.type] ?? entry.type}
-                      </span>
-                      <span>{formatDate(entry.created_at)}</span>
+                      <span className={PILL_META}>{TYPE_LABELS[entry.type] ?? entry.type}</span>
+                      <span className={BODY_SUBTLE}>{formatDate(entry.created_at)}</span>
                     </div>
                     <h3 className="mt-2 text-xl font-semibold text-slate-900">{entry.title}</h3>
                     {entry.tags.length > 0 && (
@@ -365,9 +376,7 @@ export default function KnowledgeBasePanel({
                   </div>
                   <div className="text-sm text-slate-500">
                     <p className="font-semibold text-slate-600">Uploaded by</p>
-                    <p className="text-slate-900">
-                      {entry.created_by_email || "Workspace collaborator"}
-                    </p>
+                    <p className="text-slate-900">{entry.created_by_email || "Workspace collaborator"}</p>
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4 text-sm font-semibold text-slate-600">

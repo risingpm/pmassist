@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -12,12 +14,13 @@ from .models import Project
 from . import prd, agent, auth, models
 from .workspaces import workspaces_router, user_workspaces_router
 from . import knowledge_base
-from backend import roadmap_chat
+from backend import roadmap_chat, roadmap, roadmap_phases
 from backend import templates
 from backend import project_members
 from backend import builder
 from backend import dashboard
 from backend import workspace_ai
+from backend import strategy
 from backend import tasks
 from backend import tasks_ai
 from backend.rbac import ensure_membership, ensure_project_access
@@ -27,7 +30,8 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-app.mount("/static", StaticFiles(directory="backend/static"), name="static")
+static_dir = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # CORS middleware (allow everything for now)
 app.add_middleware(
@@ -211,9 +215,12 @@ app.include_router(prototypes.router)
 app.include_router(links.router)
 app.include_router(prototype_agent.router)
 app.include_router(prd.router)
+app.include_router(prd.embeddings_router)
 app.include_router(agent.router)
 app.include_router(knowledge_base.router)
 app.include_router(roadmap_chat.router)
+app.include_router(roadmap.router)
+app.include_router(roadmap_phases.router)
 app.include_router(builder.router)
 app.include_router(dashboard.router)
 app.include_router(tasks.workspace_router)
@@ -221,6 +228,7 @@ app.include_router(tasks.task_router)
 app.include_router(tasks_ai.router)
 app.include_router(project_members.router)
 app.include_router(templates.router)
+app.include_router(strategy.router)
 app.include_router(workspace_ai.router)
 app.include_router(workspaces_router)
 app.include_router(user_workspaces_router)

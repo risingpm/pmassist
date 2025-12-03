@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import {
   listTemplates,
@@ -9,17 +9,33 @@ import {
   forkTemplate,
   applyTemplate,
   getTemplate,
+  getProjects,
+  createPrd,
 } from "../../api";
-import type { TemplateRecord, TemplateCreatePayload, TemplateUpdatePayload, TemplateDetail } from "../../api";
-import { WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY } from "../../constants";
+import type {
+  TemplateRecord,
+  TemplateCreatePayload,
+  TemplateUpdatePayload,
+  TemplateDetail,
+  TemplateFilters,
+  TemplateVisibility,
+} from "../../api";
+import { WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, WIDE_PAGE_CONTAINER } from "../../constants";
 import { useUserRole } from "../../context/RoleContext";
 import TemplateTagsFilter from "../../components/templates/TemplateTagsFilter";
 import CreateTemplateModal from "../../components/templates/CreateTemplateModal";
 import TemplatePreviewModal from "../../components/templates/TemplatePreviewModal";
-import WorkspaceBackLinks from "../../components/WorkspaceBackLinks";
+import TemplateLibrary from "../../components/templates/TemplateLibrary";
+import { SECTION_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, BODY_SUBTLE } from "../../styles/theme";
+
+type WorkspaceProject = {
+  id: string;
+  title: string;
+};
 
 export default function TemplateLibraryPage() {
   const { workspaceId: routeWorkspaceId } = useParams<{ workspaceId?: string }>();
+  const navigate = useNavigate();
   const { workspaceRole } = useUserRole();
   const canEdit = workspaceRole === "admin" || workspaceRole === "editor";
 
@@ -43,13 +59,17 @@ export default function TemplateLibraryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateRecord[]>([]);
-  const [filters, setFilters] = useState<{ search?: string; category?: string; tag?: string | null; visibility?: string | null }>({});
+  const [filters, setFilters] = useState<TemplateFilters>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<TemplateRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDetail | TemplateRecord | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [usingTemplateId, setUsingTemplateId] = useState<string | null>(null);
   const editingInitialValues = useMemo(() => {
     if (!editingTemplate) return undefined;
     const latestVersion = editingTemplate.latest_version;
@@ -78,6 +98,29 @@ export default function TemplateLibraryPage() {
       .catch((err: any) => setError(err.message || "Failed to load templates"))
       .finally(() => setLoading(false));
   }, [workspaceId, filters]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setProjects([]);
+      return;
+    }
+    setProjectsLoading(true);
+    getProjects(workspaceId)
+      .then((data) => {
+        setProjects((data.projects || []).map((project: any) => ({ id: project.id, title: project.title })));
+        setProjectError(null);
+      })
+      .catch((err: any) => setProjectError(err.message || "Create a project to use templates with AI."))
+      .finally(() => setProjectsLoading(false));
+  }, [workspaceId]);
+  useEffect(() => {
+    if (!workspaceId || projectsLoading) return;
+    if (projects.length === 0) {
+      setProjectError("Create a project to send templates to AI.");
+    } else {
+      setProjectError(null);
+    }
+  }, [workspaceId, projects, projectsLoading]);
 
   const handleCreate = async (payload: TemplateCreatePayload & { visibility?: string }) => {
     if (!workspaceId) return;
@@ -119,6 +162,31 @@ export default function TemplateLibraryPage() {
       setError(err.message || "Unable to load template content");
     }
   };
+  const handleUseWithAI = async (template: TemplateRecord) => {
+    if (!workspaceId) {
+      setError("Select a workspace to use templates.");
+      return;
+    }
+    if (!projects.length) {
+      setError("Create a project to use templates with AI.");
+      return;
+    }
+    const targetProject = projects[0];
+    setUsingTemplateId(template.id);
+    try {
+      await createPrd(targetProject.id, workspaceId, {
+        feature_name: template.title,
+        prompt: `Generate a PRD draft using the ${template.title} template.`,
+        template_id: template.id,
+      });
+      setNotice(`PRD draft created from “${template.title}”.`);
+      navigate(`/workspaces/${workspaceId}/projects/detail/${targetProject.id}/prd`);
+    } catch (err: any) {
+      setError(err.message || "Failed to use template with AI");
+    } finally {
+      setUsingTemplateId(null);
+    }
+  };
   const openPreviewModal = useCallback(async (template: TemplateRecord) => {
     setPreviewOpen(true);
     if (!workspaceId) {
@@ -142,22 +210,33 @@ export default function TemplateLibraryPage() {
     setPreviewTemplate(null);
   };
 
+  const navItems = useMemo(() => {
+    if (!workspaceId) return [];
+    return [
+      { label: "Dashboard", path: `/workspaces/${workspaceId}/dashboard`, active: false },
+      { label: "Projects", path: `/workspaces/${workspaceId}/projects`, active: false },
+      { label: "Knowledge", path: `/workspaces/${workspaceId}/knowledge`, active: false },
+      { label: "Templates", path: `/workspaces/${workspaceId}/templates`, active: true },
+    ];
+  }, [workspaceId]);
+
   return (
-    <div className="min-h-screen bg-slate-50 px-6 py-8">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <WorkspaceBackLinks
-          links={[
-            { to: workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects", label: "Back to workspace" },
-            { to: workspaceId ? `/workspaces/${workspaceId}/dashboard` : "/dashboard", label: "Back to dashboard" },
-          ]}
-        />
-        <div className="flex flex-col gap-2 border-b border-slate-200 pb-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Template Library</p>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-3xl font-semibold text-slate-900">{workspaceName} templates</h1>
-              <p className="text-sm text-slate-500">Curate reusable AI templates for PRDs, roadmaps, and plans.</p>
-            </div>
+    <div className="min-h-screen bg-slate-50">
+      <div className={`${WIDE_PAGE_CONTAINER} space-y-6 py-8`}>
+        <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p className={SECTION_LABEL}>Template library</p>
+            <h1 className="text-3xl font-semibold text-slate-900">{workspaceName} templates</h1>
+            <p className={BODY_SUBTLE}>Curate reusable AI templates for PRDs, roadmaps, and execution plans.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects")}
+              className={SECONDARY_BUTTON}
+            >
+              View projects
+            </button>
             {canEdit && (
               <button
                 type="button"
@@ -165,26 +244,39 @@ export default function TemplateLibraryPage() {
                   setEditingTemplate(null);
                   setModalOpen(true);
                 }}
-                className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm"
+                className={PRIMARY_BUTTON}
               >
-                + New template
+                New template
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-2 text-sm text-slate-600">
-            <select
-              value={filters.category ?? ""}
-              onChange={(event) => setFilters((prev) => ({ ...prev, category: event.target.value || undefined }))}
-              className="rounded-full border border-slate-200 px-3 py-1"
-            >
-              <option value="">All categories</option>
-              <option value="PRD">PRDs</option>
-              <option value="Roadmap">Roadmaps</option>
-              <option value="Sprint">Sprint plans</option>
-            </select>
+        </header>
+
+        {navItems.length > 0 && (
+          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+            {navItems.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => navigate(item.path)}
+                className={`rounded-full px-4 py-2 ${
+                  item.active ? "bg-slate-900 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="rounded-3xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <div className="flex flex-col gap-3 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
             <select
               value={filters.visibility ?? ""}
-              onChange={(event) => setFilters((prev) => ({ ...prev, visibility: event.target.value || undefined }))}
+              onChange={(event) => {
+                const next = event.target.value as TemplateVisibility | "";
+                setFilters((prev) => ({ ...prev, visibility: next ? (next as TemplateVisibility) : null }));
+              }}
               className="rounded-full border border-slate-200 px-3 py-1"
             >
               <option value="">All visibilities</option>
@@ -209,110 +301,21 @@ export default function TemplateLibraryPage() {
             </button>
           </div>
         )}
+        {projectError && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{projectError}</div>
+        )}
         {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>}
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">Loading templates…</div>
-        ) : templates.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-200 bg-white/60 p-8 text-center text-sm text-slate-500">
-            No templates yet. Create one to get started.
-          </div>
         ) : (
-          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
-                <tr>
-                  <th className="px-4 py-3 text-left">Template</th>
-                  <th className="px-4 py-3 text-left">Category</th>
-                  <th className="px-4 py-3 text-left">Visibility</th>
-                  <th className="px-4 py-3 text-left">Tags</th>
-                  <th className="px-4 py-3 text-left">Updated</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
-                {templates.map((template) => (
-                  <tr key={template.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => openPreviewModal(template)}
-                        className="text-left font-semibold text-slate-900 transition hover:text-blue-600"
-                      >
-                        {template.title}
-                        {template.is_recommended && (
-                          <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                            Recommended
-                          </span>
-                        )}
-                      </button>
-                      <p className="text-xs text-slate-500">{template.description || "No description"}</p>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{template.category || "—"}</td>
-                    <td className="px-4 py-3 text-slate-600 capitalize">{template.visibility}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {(template.tags || []).slice(0, 4).map((tag) => (
-                          <span key={`${template.id}-${tag}`} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                            #{tag}
-                          </span>
-                        ))}
-                        {template.tags && template.tags.length > 4 && (
-                          <span className="text-xs text-slate-400">+{template.tags.length - 4}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{new Date(template.updated_at).toLocaleDateString()}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap justify-end gap-2 text-xs font-semibold">
-                        <button
-                          type="button"
-                          onClick={() => openPreviewModal(template)}
-                          className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition hover:bg-slate-100"
-                        >
-                          Preview
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleUse(template)}
-                          className="rounded-full bg-slate-900 px-3 py-1 text-white transition hover:bg-slate-800"
-                        >
-                          Use
-                        </button>
-                        {canEdit && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingTemplate(template);
-                                setModalOpen(true);
-                              }}
-                              className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition hover:bg-slate-100"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleFork(template)}
-                              className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition hover:bg-slate-100"
-                            >
-                              Duplicate
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTemplate(template)}
-                              className="rounded-full border border-rose-200 px-3 py-1 text-rose-600 transition hover:bg-rose-50"
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <TemplateLibrary
+            templates={templates}
+            activeCategory={filters.category ?? null}
+            onCategoryChange={(category) => setFilters((prev) => ({ ...prev, category: category || undefined }))}
+            onPreview={openPreviewModal}
+            onUseWithAI={handleUseWithAI}
+            pendingTemplateId={usingTemplateId}
+          />
         )}
       </div>
 

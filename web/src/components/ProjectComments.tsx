@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { ProjectComment } from "../api";
+import { SURFACE_CARD, SECTION_LABEL, PRIMARY_BUTTON, PILL_META, BODY_SUBTLE } from "../styles/theme";
 
 function formatDate(value: string) {
   try {
@@ -113,19 +114,15 @@ export default function ProjectComments({ comments, isLoading, onCreate, onUpdat
 
   return (
     <section className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-slate-900">Project Comments</h2>
-          {hasComments && (
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {commentCountLabel}
-            </span>
-          )}
+          <div>
+            <p className={SECTION_LABEL}>Project narrative</p>
+            <h2 className="text-xl font-semibold text-slate-900">Project Comments</h2>
+          </div>
+          {hasComments && <span className={PILL_META}>{commentCountLabel}</span>}
         </div>
-        <p className="mt-1 text-sm text-slate-500">
-          Capture ongoing discussions, insights, and next steps that shape this project.
-        </p>
-
+        <p className={BODY_SUBTLE}>Capture ongoing discussions, insights, and next steps that shape this project.</p>
         <form onSubmit={handleCreate} className="mt-4 space-y-3">
           <textarea
             value={draft}
@@ -145,7 +142,7 @@ export default function ProjectComments({ comments, isLoading, onCreate, onUpdat
             <button
               type="submit"
               disabled={createPending}
-              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+              className={PRIMARY_BUTTON}
             >
               {createPending ? "Saving..." : "Add comment"}
             </button>
@@ -154,7 +151,7 @@ export default function ProjectComments({ comments, isLoading, onCreate, onUpdat
         </form>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`${SURFACE_CARD} p-6`}>
         <h3 className="text-lg font-semibold text-slate-800">History</h3>
         {isLoading ? (
           <p className="mt-3 text-sm text-slate-500">Loading comments…</p>

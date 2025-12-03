@@ -1,7 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getPrd, refinePrd, exportPrd, deletePrd, type ProjectRole, type KnowledgeBaseContextItem } from "../api";
+import {
+  getPrd,
+  refinePrd,
+  exportPrd,
+  deletePrd,
+  savePrdVersion,
+  getPrdHistory,
+  comparePrdVersions,
+  askPrdQuestion,
+  rebuildPrdEmbeddings,
+  type ProjectRole,
+  type KnowledgeBaseContextItem,
+  type PRDRecord,
+  type VerificationDetails,
+  type PRDVersionSummary,
+  type PRDDiffResponse,
+} from "../api";
 import ContextUsedPanel from "./ContextUsedPanel";
+import VerificationNotice from "./VerificationNotice";
+import PRDVersionHistory from "./PRDVersionHistory";
+import PRDDiffView from "./PRDDiffView";
+import PRDQAPanel from "./PRDQAPanel";
+import DecisionNotes from "./DecisionNotes";
+import {
+  SURFACE_CARD,
+  SECTION_LABEL,
+  PRIMARY_BUTTON,
+  SECONDARY_BUTTON,
+  PILL_META,
+  BODY_SUBTLE,
+} from "../styles/theme";
 
 type PRDDetailProps = {
   projectId: string;
@@ -12,50 +41,78 @@ type PRDDetailProps = {
 };
 
 export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, onBack }: PRDDetailProps) {
-  const [prd, setPrd] = useState<any | null>(null);
+  const [activePrdId, setActivePrdId] = useState(prdId);
+  const [prd, setPrd] = useState<PRDRecord | null>(null);
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<PRDVersionSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [refineText, setRefineText] = useState("");
+  const [editableContent, setEditableContent] = useState("");
+  const [contextEntries, setContextEntries] = useState<KnowledgeBaseContextItem[]>([]);
+  const [verification, setVerification] = useState<VerificationDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [savingVersion, setSavingVersion] = useState(false);
+  const [diff, setDiff] = useState<PRDDiffResponse | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffSummary, setDiffSummary] = useState<string | null>(null);
+  const [summarizingDiff, setSummarizingDiff] = useState(false);
+  const [rebuildingEmbeddings, setRebuildingEmbeddings] = useState(false);
+  const [sidePanel, setSidePanel] = useState<"assist" | "history">("assist");
   const canEdit = projectRole === "owner" || projectRole === "contributor";
-  const [contextEntries, setContextEntries] = useState<KnowledgeBaseContextItem[]>([]);
 
-  // Fetch PRD when component mounts
+  useEffect(() => {
+    setActivePrdId(prdId);
+  }, [prdId]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    setHistoryLoading(true);
+    getPrdHistory(projectId, workspaceId)
+      .then(setHistory)
+      .catch((err) => setError(err.message || "Failed to load history"))
+      .finally(() => setHistoryLoading(false));
+  }, [projectId, workspaceId]);
+
   useEffect(() => {
     const fetchPrd = async () => {
       if (!workspaceId) {
         setError("Workspace context missing. Go back and select a workspace.");
         return;
       }
-    setLoading(true);
-    try {
-      const data = await getPrd(projectId, prdId, workspaceId);
-      setPrd(data);
-      setContextEntries(data.context_entries ?? []);
-      setError(null);
-    } catch (err) {
-      console.error("Failed to load PRD:", err);
-      setError("⚠️ Failed to load PRD");
-    } finally {
+      setLoading(true);
+      try {
+        const data = await getPrd(projectId, activePrdId, workspaceId);
+        setPrd(data);
+        setEditableContent(data.content || "");
+        setContextEntries(data.context_entries ?? []);
+        setVerification(data.verification ?? null);
+        setError(null);
+      } catch (err) {
+        console.error("Failed to load PRD:", err);
+        setError("⚠️ Failed to load PRD");
+      } finally {
         setLoading(false);
       }
     };
-
     fetchPrd();
-  }, [projectId, prdId, workspaceId]);
+  }, [projectId, activePrdId, workspaceId]);
 
-  // Handle refinement
   const handleRefine = async () => {
-    if (!refineText.trim() || !canEdit) return;
+    if (!refineText.trim() || !canEdit || !workspaceId) return;
     setLoading(true);
     try {
-      if (!workspaceId) throw new Error("Missing workspace context");
-      const refined = await refinePrd(projectId, prdId, workspaceId, refineText);
+      const refined = await refinePrd(projectId, activePrdId, workspaceId, refineText);
       setPrd(refined);
+      setEditableContent(refined.content || "");
       setContextEntries(refined.context_entries ?? []);
+      setVerification(refined.verification ?? null);
       setRefineText("");
-      setError(null);
       setSuccess("✅ PRD refined successfully");
+      setError(null);
+      const updatedHistory = await getPrdHistory(projectId, workspaceId);
+      setHistory(updatedHistory);
+      setActivePrdId(refined.id);
     } catch (err) {
       console.error("Failed to refine PRD:", err);
       setError("⚠️ Failed to refine PRD");
@@ -65,13 +122,36 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
     }
   };
 
-  // Handle export
-  const handleExport = async () => {
+  const handleSaveVersion = async () => {
+    if (!workspaceId || !editableContent.trim() || !canEdit) return;
+    setSavingVersion(true);
     try {
-      if (!workspaceId) throw new Error("Missing workspace context");
-      await exportPrd(projectId, prdId, workspaceId);
-      setError(null);
+      const saved = await savePrdVersion(projectId, activePrdId, workspaceId, {
+        content: editableContent,
+        feature_name: prd?.feature_name ?? null,
+        description: prd?.description ?? null,
+      });
+      setPrd(saved);
+      setContextEntries(saved.context_entries ?? []);
+      setVerification(saved.verification ?? null);
+      setActivePrdId(saved.id);
+      setSuccess("💾 Saved as new version");
+      const updatedHistory = await getPrdHistory(projectId, workspaceId);
+      setHistory(updatedHistory);
+    } catch (err: any) {
+      setError(err.message || "Failed to save version");
+      setSuccess(null);
+    } finally {
+      setSavingVersion(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!workspaceId) return;
+    try {
+      await exportPrd(projectId, activePrdId, workspaceId);
       setSuccess("📤 Export started");
+      setError(null);
     } catch (err) {
       console.error("Failed to export PRD:", err);
       setError("⚠️ Failed to export PRD");
@@ -80,19 +160,16 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
   };
 
   const handleDelete = async () => {
-    if (!canEdit) {
+    if (!workspaceId || !canEdit) {
       setError("You have read-only access to this project.");
       return;
     }
-    const confirmed = window.confirm("Delete this PRD? This action cannot be undone.");
-    if (!confirmed) return;
-
+    if (!window.confirm("Delete this PRD? This action cannot be undone.")) return;
     setLoading(true);
     try {
-      if (!workspaceId) throw new Error("Missing workspace context");
-      await deletePrd(projectId, prdId, workspaceId);
-      setError(null);
+      await deletePrd(projectId, activePrdId, workspaceId);
       setSuccess("🗑️ PRD deleted successfully");
+      setError(null);
       onBack();
     } catch (err) {
       console.error("Failed to delete PRD:", err);
@@ -103,78 +180,234 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
     }
   };
 
-  return (
-    <div>
-      {!workspaceId && (
-        <p className="mb-4 text-sm text-red-500">
-          Workspace context missing. Please return to the project list.
-        </p>
-      )}
-      {/* Back Button */}
-      <button
-        onClick={onBack}
-        className="mb-4 px-4 py-2 bg-gray-600 text-white rounded"
-      >
-        ⬅ Back to PRDs
-      </button>
+  const handleCompare = async (v1: number, v2: number) => {
+    if (!workspaceId) return;
+    setDiffLoading(true);
+    setDiffSummary(null);
+    try {
+      const result = await comparePrdVersions(projectId, workspaceId, v1, v2);
+      setDiff(result);
+    } catch (err: any) {
+      setError(err.message || "Failed to build diff");
+    } finally {
+      setDiffLoading(false);
+    }
+  };
 
-      {loading && <p className="text-gray-500">Loading...</p>}
-      {error && <p className="text-red-500">{error}</p>}
-      {success && <p className="text-green-600">{success}</p>}
-      <ContextUsedPanel entries={contextEntries} />
+  const handleSummarizeDiff = async () => {
+    if (!workspaceId || !diff) return;
+    setSummarizingDiff(true);
+    try {
+      const summary = await askPrdQuestion(projectId, workspaceId, {
+        question: `Summarize the key changes between version ${diff.version_a} and version ${diff.version_b}.`,
+        version_a: diff.version_a,
+        version_b: diff.version_b,
+      });
+      setDiffSummary(summary.answer);
+    } catch (err: any) {
+      setError(err.message || "Failed to summarize differences");
+    } finally {
+      setSummarizingDiff(false);
+    }
+  };
+
+  const handleRebuildEmbeddings = async () => {
+    if (!workspaceId) return;
+    setRebuildingEmbeddings(true);
+    try {
+      await rebuildPrdEmbeddings(projectId, workspaceId);
+      setSuccess("🔁 Rebuilt AI context for this project");
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || "Failed to rebuild embeddings");
+    } finally {
+      setRebuildingEmbeddings(false);
+    }
+  };
+
+  const handleSelectVersion = (id: string) => {
+    setActivePrdId(id);
+    setDiff(null);
+    setDiffSummary(null);
+  };
+
+  const activeVersion = prd?.version ?? 0;
+  const previewContent = useMemo(() => editableContent || "", [editableContent]);
+
+  return (
+    <div className="flex min-h-[calc(100vh-120px)] flex-col gap-4 overflow-hidden">
+      <div className={`${SURFACE_CARD} flex flex-wrap items-center justify-between gap-4 px-6 py-5`}>
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className={SECONDARY_BUTTON}>
+            ⬅ Back
+          </button>
+          <div>
+            <p className={SECTION_LABEL}>Product Requirements</p>
+            <h1 className="text-xl font-semibold text-slate-900">{prd?.feature_name || "PRD Detail"}</h1>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={PILL_META}>Version {activeVersion || "—"}</span>
+          {prd && <span className={PILL_META}>Updated {new Date(prd.updated_at).toLocaleString()}</span>}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {loading && <p className="text-slate-500">Loading...</p>}
+        {error && <p className="text-rose-600">{error}</p>}
+        {success && <p className="text-emerald-600">{success}</p>}
+      </div>
 
       {prd ? (
-        <div>
-          <h1 className="text-2xl font-bold mb-4">
-            {prd.feature_name || "PRD Detail"}
-          </h1>
+        <div className="grid flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,2.2fr)_minmax(320px,1fr)]">
+          <section className={`${SURFACE_CARD} flex flex-col overflow-hidden`}>
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
+              <div>
+                <p className={SECTION_LABEL}>Current draft</p>
+                <p className={BODY_SUBTLE}>
+                  {prd.created_by ? "Authored" : "Created"} {new Date(prd.created_at).toLocaleString()}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleSaveVersion}
+                  disabled={!canEdit || savingVersion || !editableContent.trim()}
+                  className={PRIMARY_BUTTON}
+                >
+                  {savingVersion ? "Saving…" : "Save version"}
+                </button>
+                <button
+                  onClick={handleExport}
+                  className={SECONDARY_BUTTON}
+                >
+                  📤 Export
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={!canEdit}
+                  className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
+                >
+                  🗑 Delete
+                </button>
+              </div>
+            </header>
+            <div className="flex flex-1 flex-col gap-4 px-6 py-4 lg:overflow-hidden">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Markdown source</p>
+                <textarea
+                  value={editableContent}
+                  onChange={(event) => setEditableContent(event.target.value)}
+                  disabled={!canEdit}
+                  className="mt-2 h-48 w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 shadow-inner focus:border-blue-500 focus:outline-none disabled:bg-slate-50"
+                  placeholder="Edit markdown directly…"
+                />
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Preview</p>
+                <div className="mt-2 flex-1 overflow-auto rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                  <div className="prose prose-sm max-w-none">
+                    <ReactMarkdown>{previewContent}</ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
 
-          {/* PRD Content (Markdown) */}
-          <div className="p-4 border rounded bg-gray-50 mb-6">
-            <ReactMarkdown>{prd.content || ""}</ReactMarkdown>
-          </div>
-
-          {/* Refine Section */}
-          <div className="mb-6">
-            <textarea
-              value={refineText}
-              onChange={(e) => setRefineText(e.target.value)}
-              placeholder="Enter refinement instructions..."
-              className="w-full p-2 border rounded mb-2"
-              rows={4}
-              disabled={!canEdit}
-            />
-            <button
-              onClick={handleRefine}
-              disabled={loading || !canEdit}
-              className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
-            >
-              Refine PRD
-            </button>
-            {!canEdit && (
-              <p className="mt-2 text-xs text-slate-500">
-                Viewer access cannot refine PRDs.
-              </p>
-            )}
-          </div>
-
-          {/* Export Button */}
-          <div className="flex gap-2">
-            <button
-              onClick={handleExport}
-              disabled={loading}
-              className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
-            >
-              📤 Export PRD
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={loading || !canEdit}
-              className="px-4 py-2 bg-red-600 text-white rounded disabled:opacity-50"
-            >
-              🗑 Delete PRD
-            </button>
-          </div>
+          <section className="flex h-full flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-lg">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
+              <div className="rounded-full bg-slate-50 p-1 text-xs font-semibold text-slate-500">
+                <button
+                  type="button"
+                  onClick={() => setSidePanel("assist")}
+                  className={`rounded-full px-3 py-1 transition ${
+                    sidePanel === "assist" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  Assist
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSidePanel("history")}
+                  className={`rounded-full px-3 py-1 transition ${
+                    sidePanel === "history" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  History
+                </button>
+              </div>
+              <span className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                {sidePanel === "assist" ? "AI copilots" : "Timeline & decisions"}
+              </span>
+            </div>
+            <div className="flex-1 overflow-hidden p-4">
+              {sidePanel === "assist" ? (
+                <div className="flex h-full flex-col gap-4 overflow-auto pr-1">
+                  <VerificationNotice verification={verification} />
+                  <ContextUsedPanel entries={contextEntries} />
+                  <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+                    <p className="text-sm font-semibold text-slate-900">Refine via AI</p>
+                    <textarea
+                      value={refineText}
+                      onChange={(e) => setRefineText(e.target.value)}
+                      placeholder="Describe the change or ask the AI to focus on a section…"
+                      className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                      rows={4}
+                      disabled={!canEdit}
+                    />
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                      {!canEdit && <span>Viewer access cannot refine PRDs.</span>}
+                      <button
+                        onClick={handleRefine}
+                        disabled={loading || !canEdit || !refineText.trim()}
+                        className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        Refine PRD
+                      </button>
+                    </div>
+                  </div>
+                  <PRDQAPanel
+                    projectId={projectId}
+                    prdId={activePrdId}
+                    workspaceId={workspaceId}
+                    activeVersion={activeVersion}
+                    className="shadow-sm"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-full flex-col gap-4 overflow-auto pr-1">
+                  <PRDVersionHistory
+                    history={history}
+                    loading={historyLoading}
+                    selectedPrdId={activePrdId}
+                    onSelectVersion={handleSelectVersion}
+                    onCompare={handleCompare}
+                    onRebuildEmbeddings={handleRebuildEmbeddings}
+                    rebuildingEmbeddings={rebuildingEmbeddings}
+                    className="shadow-sm"
+                  />
+                  <PRDDiffView
+                    diff={diff}
+                    loading={diffLoading}
+                    summary={diffSummary}
+                    summarizing={summarizingDiff}
+                    onSummarize={diff ? handleSummarizeDiff : undefined}
+                    onClose={() => {
+                      setDiff(null);
+                      setDiffSummary(null);
+                    }}
+                    className="shadow-sm"
+                  />
+                  <DecisionNotes
+                    projectId={projectId}
+                    prdId={activePrdId}
+                    workspaceId={workspaceId}
+                    currentVersion={activeVersion}
+                    projectRole={projectRole}
+                    className="shadow-sm"
+                  />
+                </div>
+              )}
+            </div>
+          </section>
         </div>
       ) : (
         !loading && <p className="text-gray-500">No PRD found.</p>

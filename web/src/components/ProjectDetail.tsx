@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SafeMarkdown from "./SafeMarkdown";
 import PRDList from "./PRDList";
 import PRDDetail from "./PRDDetail";
@@ -9,7 +9,8 @@ import ProjectPrototypeAgent from "./ProjectPrototypeAgent";
 import ProjectMembersPanel from "./ProjectMembersPanel";
 import UploadEntryModal from "./UploadEntryModal";
 import ContextUsedPanel from "./ContextUsedPanel";
-import KanbanBoard from "./tasks/KanbanBoard";
+import VerificationNotice from "./VerificationNotice";
+import KanbanBoard, { KANBAN_STATUSES, type KanbanMovePayload } from "./tasks/KanbanBoard";
 import TaskForm from "./tasks/TaskForm";
 import TaskDetailDrawer from "./tasks/TaskDetailDrawer";
 import GenerateTasksModal from "./tasks/GenerateTasksModal";
@@ -19,6 +20,9 @@ import RoadmapPreviewCard from "./RoadmapPreview";
 import AgentAvatar from "./AgentAvatar";
 import useAgentName from "../hooks/useAgentName";
 import TemplatePickerModal from "./templates/TemplatePickerModal";
+import RoadmapPhaseView from "./roadmap/RoadmapPhaseView";
+import ReprioritizeSuggestions from "./roadmap/ReprioritizeSuggestions";
+import ExecutionInsightsDashboard from "./roadmap/ExecutionInsightsDashboard";
 import {
   getProject,
   fetchRoadmap as fetchSavedRoadmap,
@@ -67,13 +71,17 @@ import type {
   KnowledgeBaseEntryPayload,
   KnowledgeSearchResult,
   TaskRecord,
+  TaskStatus,
   TaskPayload,
   TaskComment,
   TaskGenerationItem,
   TemplateRecord,
+  VerificationDetails,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
 import { useUserRole } from "../context/RoleContext";
+import ProjectStrategistPanel from "./strategy/ProjectStrategistPanel";
+import { SURFACE_CARD, SECTION_LABEL, PRIMARY_BUTTON, BODY_SUBTLE } from "../styles/theme";
 
 function formatRoadmapForDisplay(content: string): string {
   if (!content) return "";
@@ -122,7 +130,17 @@ function formatRoadmapForDisplay(content: string): string {
   }
 }
 
-type ProjectTab = "knowledge" | "roadmap" | "prototypes" | "tasks" | "prd" | "members";
+type ProjectTab = "knowledge" | "roadmap" | "prototypes" | "tasks" | "prd" | "members" | "strategy";
+
+const PROJECT_TABS: Array<{ id: ProjectTab; label: string }> = [
+  { id: "knowledge", label: "Knowledge" },
+  { id: "roadmap", label: "Roadmap" },
+  { id: "prototypes", label: "Prototypes" },
+  { id: "tasks", label: "Tasks" },
+  { id: "prd", label: "PRDs" },
+  { id: "members", label: "Members" },
+  { id: "strategy", label: "Strategy" },
+];
 
 type ProjectDetailProps = {
   projectId: string;
@@ -152,6 +170,45 @@ const ROADMAP_CHAT_PROMPTS = [
   "Emphasize onboarding and activation metrics in Phase 1.",
   "Add competitive benchmarking work to the next roadmap.",
 ];
+
+const buildGroupedTasks = (taskList: TaskRecord[]): Record<TaskStatus, TaskRecord[]> => {
+  const grouped: Record<TaskStatus, TaskRecord[]> = {
+    todo: [],
+    in_progress: [],
+    done: [],
+  };
+  taskList.forEach((task) => {
+    grouped[task.status].push(task);
+  });
+  return grouped;
+};
+
+const reorderTasksForKanban = (taskList: TaskRecord[], move: KanbanMovePayload): TaskRecord[] => {
+  const grouped = buildGroupedTasks(taskList);
+  const sourceColumn = [...grouped[move.sourceStatus]];
+  if (!sourceColumn[move.sourceIndex]) {
+    return taskList;
+  }
+  const sameColumn = move.sourceStatus === move.destinationStatus;
+  const destinationColumn = sameColumn ? sourceColumn : [...grouped[move.destinationStatus]];
+
+  const [movedTask] = sourceColumn.splice(move.sourceIndex, 1);
+  if (!movedTask) {
+    return taskList;
+  }
+
+  const updatedTask = sameColumn ? movedTask : { ...movedTask, status: move.destinationStatus };
+  const insertionIndex = Math.min(move.destinationIndex, destinationColumn.length);
+  destinationColumn.splice(insertionIndex, 0, updatedTask);
+
+  return KANBAN_STATUSES.flatMap((status) => {
+    if (status === move.sourceStatus || status === move.destinationStatus) {
+      const column = status === move.sourceStatus ? sourceColumn : destinationColumn;
+      return column;
+    }
+    return grouped[status];
+  });
+};
 
 export default function ProjectDetail({
   projectId,
@@ -272,6 +329,7 @@ export default function ProjectDetail({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatSuggestions, setChatSuggestions] = useState<string[]>([]);
   const [chatContextEntries, setChatContextEntries] = useState<KnowledgeBaseContextItem[]>([]);
+  const [chatVerification, setChatVerification] = useState<VerificationDetails | null>(null);
   const [chatRoadmapContent, setChatRoadmapContent] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
@@ -283,6 +341,7 @@ export default function ProjectDetail({
   const [editContent, setEditContent] = useState("");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [savingRoadmap, setSavingRoadmap] = useState(false);
+  const [roadmapRefreshKey, setRoadmapRefreshKey] = useState(0);
   const [isEditingProject, setIsEditingProject] = useState(false);
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectSaveMessage, setProjectSaveMessage] = useState<string | null>(null);
@@ -294,12 +353,20 @@ export default function ProjectDetail({
     target_personas: "",
   });
   const agentName = useAgentName();
+  const handleRoadmapRefresh = useCallback(() => {
+    setRoadmapRefreshKey((prev) => prev + 1);
+  }, []);
 
+  const lastInitialTabRef = useRef<ProjectTab | null>(null);
   useEffect(() => {
-    if (initialTab && initialTab !== activeTab) {
-      setActiveTab(initialTab);
+    if (!initialTab) {
+      lastInitialTabRef.current = null;
+      return;
     }
-  }, [initialTab, activeTab]);
+    if (lastInitialTabRef.current === initialTab) return;
+    lastInitialTabRef.current = initialTab;
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     if (onTabChange) {
@@ -339,6 +406,7 @@ export default function ProjectDetail({
     setChatContextEntries([]);
     setChatRoadmapContent(null);
     setChatError(null);
+    setChatVerification(null);
   };
 
   useEffect(() => {
@@ -712,13 +780,21 @@ export default function ProjectDetail({
     }
   };
 
-  const handleTaskStatusChange = async (taskId: string, status: "todo" | "in_progress" | "done") => {
+  const handleTaskMove = async (move: KanbanMovePayload) => {
     if (!effectiveWorkspaceId || !userId || !canManageTasks) return;
-    try {
-      await updateTask(taskId, effectiveWorkspaceId, userId, { status });
-      setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, status } : task)));
-    } catch (err) {
-      console.warn("Failed to update task status", err);
+    let rollbackValue: TaskRecord[] = [];
+    setTasks((prev) => {
+      rollbackValue = prev;
+      return reorderTasksForKanban(prev, move);
+    });
+    if (move.sourceStatus !== move.destinationStatus) {
+      try {
+        await updateTask(move.taskId, effectiveWorkspaceId, userId, { status: move.destinationStatus });
+      } catch (err: any) {
+        console.warn("Failed to update task status", err);
+        setTasks(rollbackValue);
+        setTasksError(err?.message || "Failed to update task status.");
+      }
     }
   };
 
@@ -895,9 +971,11 @@ export default function ProjectDetail({
       setChatMessages(response.messages);
       setChatSuggestions(response.suggestions ?? []);
       setChatContextEntries(response.context_entries ?? []);
+      setChatVerification(response.verification ?? null);
       setChatRoadmapContent(response.roadmap ?? null);
       if (response.roadmap) {
         await loadRoadmap();
+        handleRoadmapRefresh();
       }
     } catch (err: any) {
       console.error(err);
@@ -937,6 +1015,7 @@ export default function ProjectDetail({
       setSaveMessage("Roadmap updated.");
       setIsEditingRoadmap(false);
       await loadRoadmap();
+      handleRoadmapRefresh();
     } catch (err: any) {
       console.error(err);
       setSaveMessage(err.message || "Failed to save roadmap.");
@@ -1012,122 +1091,153 @@ export default function ProjectDetail({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-5xl px-6 py-10">
-        <button
-          onClick={onBack}
-          className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
-        >
-          ⬅ Back to Projects
-        </button>
-
-        {projectInfo && (
-          <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h1 className="text-3xl font-bold text-slate-900">{projectInfo.title}</h1>
-            <p className="mt-3 text-slate-600">{projectInfo.description}</p>
-            <div className="mt-4 grid gap-4 text-sm text-slate-600 md:grid-cols-2">
-              <div>
-                <p className="font-semibold text-slate-700">Goals</p>
-                <p className="mt-1 leading-relaxed">{projectInfo.goals}</p>
-              </div>
-              <div>
-                <p className="font-semibold text-slate-700">North Star Metric</p>
-                <p className="mt-1">
-                  {projectInfo.north_star_metric || "Not specified"}
-                </p>
-              </div>
-              <div className="md:col-span-2">
-                <p className="font-semibold text-slate-700">Target Personas</p>
-                <p className="mt-1">
-                  {projectInfo.target_personas && projectInfo.target_personas.length > 0
-                    ? projectInfo.target_personas.join(", ")
-                    : "Not specified"}
-                </p>
-              </div>
-            </div>
-            {canEditProject ? (
-              <button
-                onClick={() => {
-                  setProjectSaveMessage(null);
-                  setIsEditingProject(true);
-                }}
-                className="mt-4 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
-              >
-                Edit project details
-              </button>
-            ) : (
-              <p className="mt-4 text-xs text-slate-500">
-                You have viewer access and cannot edit project details.
-              </p>
-            )}
+    <>
+      <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+        <div className="mx-auto w-full max-w-6xl px-4 py-8 space-y-6 sm:px-6 lg:max-w-7xl 2xl:max-w-[1600px]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button
+            onClick={onBack}
+            className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-white"
+          >
+            ⬅ Back to Projects
+          </button>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500">
+            <span className="rounded-full bg-white/80 px-3 py-1 text-slate-600 shadow-sm">
+              Workspace • {workspaceRole}
+            </span>
+            <span className="rounded-full bg-white/80 px-3 py-1 text-slate-600 shadow-sm">
+              Project • {projectRole}
+            </span>
           </div>
-        )}
-
-        <div className="mt-8 flex gap-6 border-b border-slate-200 pb-3 text-sm font-semibold text-slate-500">
-          <button
-            onClick={() => setActiveTab("knowledge")}
-            className={
-              activeTab === "knowledge"
-                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
-                : "pb-2 hover:text-slate-700"
-            }
-          >
-            Knowledge Base
-          </button>
-          <button
-            onClick={() => setActiveTab("roadmap")}
-            className={
-              activeTab === "roadmap"
-                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
-                : "pb-2 hover:text-slate-700"
-            }
-          >
-            Roadmap
-          </button>
-          <button
-            onClick={() => setActiveTab("prototypes")}
-            className={
-              activeTab === "prototypes"
-                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
-                : "pb-2 hover:text-slate-700"
-            }
-          >
-            Prototypes
-          </button>
-          <button
-            onClick={() => setActiveTab("tasks")}
-            className={
-              activeTab === "tasks"
-                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
-                : "pb-2 hover:text-slate-700"
-            }
-          >
-            Tasks
-          </button>
-          <button
-            onClick={() => setActiveTab("prd")}
-            className={
-              activeTab === "prd"
-                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
-                : "pb-2 hover:text-slate-700"
-            }
-          >
-            PRDs
-          </button>
-          <button
-            onClick={() => setActiveTab("members")}
-            className={
-              activeTab === "members"
-                ? "border-b-2 border-blue-600 pb-2 text-blue-600"
-                : "pb-2 hover:text-slate-700"
-            }
-          >
-            Members
-          </button>
         </div>
 
+        <div className="grid gap-6 lg:grid-cols-[320px,minmax(0,1fr)] xl:grid-cols-[360px,minmax(0,1fr)] 2xl:grid-cols-[380px,minmax(0,1fr)]">
+          <aside className="space-y-4">
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg ring-1 ring-slate-100">
+              {projectInfo ? (
+                <>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Project Overview
+                  </p>
+                  <h1 className="mt-2 text-2xl font-bold text-slate-900">{projectInfo.title}</h1>
+                  <p className="mt-2 text-sm text-slate-600">{projectInfo.description}</p>
+                  <div className="mt-4 space-y-3 text-sm text-slate-600">
+                    <div>
+                      <p className="font-semibold text-slate-800">Goals</p>
+                      <p className="mt-1 leading-relaxed">
+                        {projectInfo.goals || "Not specified"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-800">North Star Metric</p>
+                      <p className="mt-1">
+                        {projectInfo.north_star_metric || "Not specified"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-800">Target Personas</p>
+                      <p className="mt-1">
+                        {projectInfo.target_personas && projectInfo.target_personas.length > 0
+                          ? projectInfo.target_personas.join(", ")
+                          : "Not specified"}
+                      </p>
+                    </div>
+                  </div>
+                  {canEditProject ? (
+                    <button
+                      onClick={() => {
+                        setProjectSaveMessage(null);
+                        setIsEditingProject(true);
+                      }}
+                      className="mt-4 w-full rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                    >
+                      Edit project details
+                    </button>
+                  ) : (
+                    <p className="mt-4 text-xs text-slate-500">
+                      Viewer access — project settings are locked.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div className="h-4 w-3/4 rounded bg-slate-100 animate-pulse" />
+                  <div className="h-3 w-full rounded bg-slate-100 animate-pulse" />
+                  <div className="h-3 w-5/6 rounded bg-slate-100 animate-pulse" />
+                  <div className="h-3 w-4/6 rounded bg-slate-100 animate-pulse" />
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-900 to-blue-700 p-5 text-white shadow-lg ring-1 ring-slate-900/10">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-white/70">
+                Pulse
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-white/70">Docs linked</p>
+                  <p className="text-2xl font-semibold">
+                    {knowledgeSummary.totalDocuments}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-white/70">Tasks tracked</p>
+                  <p className="text-2xl font-semibold">{taskSummary.total}</p>
+                </div>
+                <div>
+                  <p className="text-white/70">Comments</p>
+                  <p className="text-xl font-semibold">{knowledgeSummary.totalComments}</p>
+                </div>
+                <div>
+                  <p className="text-white/70">Prototypes</p>
+                  <p className="text-xl font-semibold">{knowledgeSummary.totalPrototypes}</p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-2 text-xs text-white/80">
+                {knowledgeSummary.latestDocumentUploadedAt && (
+                  <p>Last doc: {knowledgeSummary.latestDocumentUploadedAt}</p>
+                )}
+                {knowledgeSummary.latestComment && (
+                  <p>Latest note: {new Date(knowledgeSummary.latestComment.created_at).toLocaleDateString()}</p>
+                )}
+              </div>
+              <div className="mt-5 flex flex-col gap-2">
+                <button
+                  onClick={() => setActiveTab("tasks")}
+                  className="rounded-full border border-white/30 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+                >
+                  Jump to tasks
+                </button>
+                <button
+                  onClick={() => setActiveTab("knowledge")}
+                  className="rounded-full border border-white/30 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+                >
+                  View knowledge
+                </button>
+              </div>
+            </div>
+          </aside>
+
+          <div className="sticky top-4 z-20 rounded-3xl border border-slate-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur">
+            <div className="flex flex-wrap gap-2 text-sm font-semibold text-slate-500">
+              {PROJECT_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`rounded-2xl px-4 py-2 transition ${
+                    activeTab === tab.id
+                      ? "bg-slate-900 text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
         {activeTab === "knowledge" && (
-          <section className="mt-6 space-y-6">
+          <section className="space-y-6 pt-6">
             <div className="flex flex-wrap gap-4 border-b border-slate-200 pb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
               <button
                 onClick={() => setKnowledgeTab("documents")}
@@ -1508,93 +1618,124 @@ export default function ProjectDetail({
         )}
 
         {activeTab === "roadmap" && (
-          <section className="mt-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-semibold text-slate-900">AI Roadmap</h2>
+          <section className="space-y-6 pt-6">
+            <div className={`${SURFACE_CARD} flex flex-wrap items-center justify-between gap-4 px-6 py-5`}>
+              <div>
+                <p className={SECTION_LABEL}>Roadmap control</p>
+                <h2 className="text-2xl font-semibold text-slate-900">AI planning workspace</h2>
+                <p className={BODY_SUBTLE}>
+                  Define phases, link execution, and keep AI copilots in the loop without leaving this view.
+                </p>
+              </div>
               <button
                 onClick={() => {
                   if (canEditProject) setShowAssistant(true);
                 }}
                 disabled={!canEditProject}
-                className={`rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${
-                  canEditProject ? "hover:bg-blue-700" : "cursor-not-allowed opacity-60"
-                }`}
+                className={`${PRIMARY_BUTTON} flex items-center gap-2`}
               >
-                <span className="flex items-center gap-2">
-                  <AgentAvatar size="xs" className="shadow-none" />
-                  <span>Chat with {agentName}</span>
-                </span>
+                <AgentAvatar size="xs" className="shadow-none" />
+                <span>Chat with {agentName}</span>
               </button>
             </div>
-
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              {roadmapPreview && !isEditingRoadmap && (
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">
-                    Last updated {new Date(roadmapPreview.updated_at).toLocaleString()}
-                  </span>
-                  {canEditProject ? (
-                    <button
-                      onClick={handleStartEditingRoadmap}
-                      className="text-sm font-semibold text-blue-600 transition hover:text-blue-700"
-                    >
-                      Update roadmap
-                    </button>
-                  ) : (
-                    <span className="text-xs font-medium text-slate-400">Read-only view</span>
-                  )}
-                </div>
-              )}
-
-              {isEditingRoadmap ? (
-                <form onSubmit={handleSaveRoadmap} className="mt-4 space-y-3">
-                  <textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    rows={12}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                  <div className="flex items-center justify-end gap-3 text-sm">
-                    <button
-                      type="button"
-                      onClick={handleCancelEditingRoadmap}
-                      className="rounded-full bg-slate-200 px-4 py-2 font-semibold text-slate-600 transition hover:bg-slate-300"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={savingRoadmap}
-                      className="rounded-full bg-blue-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      {savingRoadmap ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-                  {saveMessage && (
-                    <p className="text-xs text-slate-500">{saveMessage}</p>
-                  )}
-                </form>
-              ) : roadmapPreview ? (
-                <div className="mt-4 space-y-4 text-sm text-slate-700">
-                  <SafeMarkdown>
-                    {formatRoadmapForDisplay(
-                      typeof roadmapPreview.content === "string"
-                        ? roadmapPreview.content
-                        : JSON.stringify(roadmapPreview.content ?? "", null, 2)
+            <div className="grid gap-6 2xl:grid-cols-[3fr,2fr]">
+              <div className="space-y-6">
+                <RoadmapPhaseView
+                  projectId={projectId}
+                  workspaceId={effectiveWorkspaceId}
+                  userId={userId}
+                  canEdit={canEditProject}
+                  refreshKey={roadmapRefreshKey}
+                  onChanged={handleRoadmapRefresh}
+                />
+                <div className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Narrative</p>
+                      <h3 className="text-xl font-semibold text-slate-900">Roadmap brief</h3>
+                      <p className="text-sm text-slate-500">
+                        Capture the “why” behind the plan — autosaved versions keep decision context handy.
+                      </p>
+                    </div>
+                    {roadmapPreview && !isEditingRoadmap && (
+                      <div className="text-right text-xs text-slate-500">
+                        <p>Last updated {new Date(roadmapPreview.updated_at).toLocaleString()}</p>
+                        {canEditProject ? (
+                          <button
+                            onClick={handleStartEditingRoadmap}
+                            className="mt-1 text-sm font-semibold text-blue-600 transition hover:text-blue-700"
+                          >
+                            Update brief
+                          </button>
+                        ) : (
+                          <span className="mt-1 block font-semibold text-slate-400">Read-only</span>
+                        )}
+                      </div>
                     )}
-                  </SafeMarkdown>
+                  </div>
+
+                  {isEditingRoadmap ? (
+                    <form onSubmit={handleSaveRoadmap} className="mt-4 space-y-3">
+                      <textarea
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        rows={12}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      />
+                      <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+                        <button
+                          type="button"
+                          onClick={handleCancelEditingRoadmap}
+                          className="rounded-full bg-slate-200 px-4 py-2 font-semibold text-slate-600 transition hover:bg-slate-300"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingRoadmap}
+                          className="rounded-full bg-blue-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                        >
+                          {savingRoadmap ? "Saving..." : "Save brief"}
+                        </button>
+                      </div>
+                      {saveMessage && <p className="text-xs text-slate-500">{saveMessage}</p>}
+                    </form>
+                  ) : roadmapPreview ? (
+                    <div className="mt-6 space-y-4 text-sm text-slate-700">
+                      <SafeMarkdown>
+                        {formatRoadmapForDisplay(
+                          typeof roadmapPreview.content === "string"
+                            ? roadmapPreview.content
+                            : JSON.stringify(roadmapPreview.content ?? "", null, 2)
+                        )}
+                      </SafeMarkdown>
+                    </div>
+                  ) : (
+                    <p className="mt-6 text-sm text-slate-500">
+                      No roadmap brief saved yet. Start a conversation with {agentName} or capture your own POV.
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <p className="mt-4 text-sm text-slate-500">
-                  No roadmap saved yet. Start a conversation with {agentName} to draft one.
-                </p>
-              )}
+              </div>
+              <div className="space-y-6">
+                <ExecutionInsightsDashboard
+                  projectId={projectId}
+                  workspaceId={effectiveWorkspaceId}
+                  refreshKey={roadmapRefreshKey}
+                />
+                <ReprioritizeSuggestions
+                  projectId={projectId}
+                  workspaceId={effectiveWorkspaceId}
+                  refreshKey={roadmapRefreshKey}
+                  onApplied={handleRoadmapRefresh}
+                />
+              </div>
             </div>
           </section>
         )}
 
         {activeTab === "prototypes" && (
-          <section className="mt-6 space-y-6">
+          <section className="space-y-6 pt-6">
             <ProjectPrototypeAgent
               session={prototypeSession}
               loading={loadingPrototypeSession || loadingPrototypes}
@@ -1616,7 +1757,7 @@ export default function ProjectDetail({
         )}
 
         {activeTab === "tasks" && (
-          <section className="mt-6 space-y-5">
+          <section className="space-y-5 pt-6">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-2xl font-semibold text-slate-900">Project Tasks & Kanban</h2>
@@ -1693,7 +1834,7 @@ export default function ProjectDetail({
               <div className="rounded-3xl border border-slate-100 bg-white p-4">
                 <KanbanBoard
                   tasks={tasks}
-                  onStatusChange={handleTaskStatusChange}
+                  onMoveTask={handleTaskMove}
                   onSelectTask={handleSelectTask}
                   canDrag={canManageTasks}
                 />
@@ -1703,7 +1844,7 @@ export default function ProjectDetail({
         )}
 
         {activeTab === "prd" && (
-          <section className="mt-6">
+          <section className="pt-6">
             {!selectedPrd ? (
               <PRDList
                 projectId={projectId}
@@ -1730,7 +1871,7 @@ export default function ProjectDetail({
         )}
 
         {activeTab === "members" && (
-          <div className="mt-6">
+          <div className="pt-6">
             <ProjectMembersPanel
               projectId={projectId}
               workspaceId={effectiveWorkspaceId}
@@ -1740,7 +1881,18 @@ export default function ProjectDetail({
             />
           </div>
         )}
+        {activeTab === "strategy" && effectiveWorkspaceId && (
+          <div className="pt-6">
+            <ProjectStrategistPanel
+              workspaceId={effectiveWorkspaceId}
+              projectId={projectId}
+              userId={userId}
+            />
+          </div>
+        )}
       </div>
+    </div>
+  </div>
       <TaskForm
         open={taskFormOpen}
         onClose={closeTaskForm}
@@ -1839,6 +1991,7 @@ export default function ProjectDetail({
                   onViewFull={roadmapPreview ? () => setActiveTab("roadmap") : undefined}
                 />
                 <ContextUsedPanel entries={chatContextEntries} />
+                <VerificationNotice verification={chatVerification} />
               </div>
             </div>
           </div>
@@ -1998,6 +2151,6 @@ export default function ProjectDetail({
           projectOptions={[{ id: projectId, label: projectInfo?.title || "This project" }]}
         />
       )}
-    </div>
+    </>
   );
 }

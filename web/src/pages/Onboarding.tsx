@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { GoogleLogin, GoogleOAuthProvider, type CredentialResponse } from "@react-oauth/google";
 
@@ -7,6 +7,7 @@ import {
   getUserAgent,
   updateUserAgent,
   loginWithGoogle,
+  initializeWorkspace,
   type UserAgent,
   type UserAgentPayload,
   type AuthResponse,
@@ -17,6 +18,9 @@ import {
   WORKSPACE_ID_KEY,
   WORKSPACE_NAME_KEY,
   DEFAULT_AGENT_NAME,
+  DEMO_INITIALIZED_KEY,
+  DEMO_WORKSPACE_ID_KEY,
+  DEMO_PROJECT_ID_KEY,
 } from "../constants";
 import { setStoredAgentProfile } from "../utils/agentProfile";
 
@@ -153,6 +157,32 @@ export default function OnboardingPage() {
     if (typeof window === "undefined") return null;
     return window.sessionStorage.getItem(WORKSPACE_NAME_KEY);
   });
+  const maybeInitializeDemoWorkspace = useCallback(
+    async (authResult: AuthResponse) => {
+      if (typeof window === "undefined" || !authResult.id) return null;
+      const alreadyInitialized = window.localStorage.getItem(DEMO_INITIALIZED_KEY) === "true";
+      if (alreadyInitialized) {
+        return null;
+      }
+      try {
+        const result = await initializeWorkspace(authResult.id);
+        window.localStorage.setItem(DEMO_INITIALIZED_KEY, "true");
+        window.localStorage.setItem(DEMO_WORKSPACE_ID_KEY, result.workspace_id);
+        if (result.project_id) {
+          window.localStorage.setItem(DEMO_PROJECT_ID_KEY, result.project_id);
+        }
+        if (!authResult.workspace_id && result.workspace_id) {
+          window.sessionStorage.setItem(WORKSPACE_ID_KEY, result.workspace_id);
+          setWorkspaceId(result.workspace_id);
+        }
+        return result;
+      } catch (err) {
+        console.warn("Failed to initialize demo workspace", err);
+        return null;
+      }
+    },
+    []
+  );
 
   const extractErrorMessage = (value: unknown): string => {
     if (!value) return "Something went wrong. Please try again.";
@@ -252,6 +282,7 @@ export default function OnboardingPage() {
     try {
       const authResult = await loginWithGoogle(credential);
       persistAuthSession(authResult);
+      await maybeInitializeDemoWorkspace(authResult);
     } catch (err) {
       console.error("Google sign-in failed during onboarding", err);
       setAuthError(extractErrorMessage(err));

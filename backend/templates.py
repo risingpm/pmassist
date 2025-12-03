@@ -112,6 +112,92 @@ DEFAULT_SYSTEM_TEMPLATES: list[dict[str, object]] = [
 - Prior art
 """,
     },
+    {
+        "title": "PM Assist • Outcome Roadmap",
+        "category": "Roadmap",
+        "description": "Sequence initiatives around measurable customer and business outcomes.",
+        "tags": ["roadmap", "outcomes", "strategy"],
+        "content": """# North Star
+- What customer value or KPI anchors this roadmap?
+
+## Outcome 1 (0-3 months)
+- Problem it addresses
+- Success metric / target
+- Key bets or releases
+
+## Outcome 2 (3-6 months)
+- Problem it addresses
+- Success metric / target
+- Key bets or releases
+
+## Outcome 3 (6-12 months)
+- Problem it addresses
+- Success metric / target
+- Key bets or releases
+
+## Risks & Assumptions
+- Risk/assumption
+""",
+    },
+    {
+        "title": "PM Assist • Theme Roadmap",
+        "category": "Roadmap",
+        "description": "Roadmap organized into strategic themes with linked initiatives and KPIs.",
+        "tags": ["roadmap", "themes", "planning"],
+        "content": """# Strategic Pillars
+- Pillar
+- Why it matters now
+
+## Theme 1
+- Objective
+- Core initiatives
+- Impact metric
+- Dependencies
+
+## Theme 2
+- Objective
+- Core initiatives
+- Impact metric
+- Dependencies
+
+## Theme 3
+- Objective
+- Core initiatives
+- Impact metric
+- Dependencies
+
+## Notes
+- Alignment callouts or guardrails
+""",
+    },
+    {
+        "title": "PM Assist • Platform Investment Roadmap",
+        "category": "Roadmap",
+        "description": "Plan foundational workstreams across experience, data, and infrastructure tracks.",
+        "tags": ["roadmap", "platform", "engineering"],
+        "content": """# Vision
+- Long-term capability unlocked by these investments
+
+## Experience Track
+- Customer problem or workflow
+- Key milestones
+- Launch criteria
+
+## Data & Intelligence Track
+- Data quality / coverage goals
+- Models or services to ship
+- Measurement plan
+
+## Infrastructure Track
+- Reliability / scalability targets
+- Core migrations or refactors
+- Rollout considerations
+
+## Cross-Team Alignment
+- Partner teams
+- Decision / review cadence
+""",
+    },
 ]
 
 

@@ -21,6 +21,11 @@ export default function ContextUsedPanel({ entries, label = "Context used" }: Co
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
                 {entry.type}
               </span>
+              {entry.marker && (
+                <span className="rounded-full bg-slate-900/10 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-slate-700">
+                  {entry.marker}
+                </span>
+              )}
             </div>
             {entry.snippet && (
               <p className="mt-1 text-xs text-slate-500">

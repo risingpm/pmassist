@@ -5,6 +5,13 @@ from uuid import UUID
 
 WorkspaceRoleLiteral = Literal["admin", "editor", "viewer"]
 ProjectRoleLiteral = Literal["owner", "contributor", "viewer"]
+TaskStatusLiteral = Literal["todo", "in_progress", "done"]
+
+class VerificationDetails(BaseModel):
+    status: Literal["passed", "failed", "skipped", "declined"]
+    message: str
+
+
 
 # ---------------------------------------------------------
 # PRD Schemas
@@ -35,10 +42,78 @@ class PRDResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     workspace_id: UUID | None = None
+    created_by: UUID | None = None
     context_entries: list["KnowledgeBaseContextItem"] | None = None
+    verification: VerificationDetails | None = None
 
     class Config:
         from_attributes = True
+
+
+class PRDSaveRequest(BaseModel):
+    content: str
+    feature_name: str | None = None
+    description: str | None = None
+
+
+class PRDVersionSummary(BaseModel):
+    id: UUID
+    version: int
+    feature_name: str | None = None
+    is_active: bool
+    created_at: datetime
+    created_by: UUID | None = None
+    author_name: str | None = None
+    decision_count: int = 0
+
+
+class PRDDiffLine(BaseModel):
+    type: Literal["equal", "insert", "delete", "replace"]
+    left_line: str | None = None
+    right_line: str | None = None
+    left_number: int | None = None
+    right_number: int | None = None
+
+
+class PRDDiffResponse(BaseModel):
+    version_a: int
+    version_b: int
+    prd_a_id: UUID | None = None
+    prd_b_id: UUID | None = None
+    diff: list[PRDDiffLine]
+
+
+class PRDDecisionNoteCreate(BaseModel):
+    decision: str
+    rationale: str | None = None
+    version: int | None = None
+
+
+class PRDDecisionNoteResponse(BaseModel):
+    id: UUID
+    prd_id: UUID
+    project_id: UUID
+    workspace_id: UUID
+    version: int
+    decision: str
+    rationale: str | None = None
+    created_by: UUID | None = None
+    author_name: str | None = None
+    created_at: datetime
+
+
+class PRDQARequest(BaseModel):
+    question: str
+    prd_id: UUID | None = None
+    version_a: int | None = None
+    version_b: int | None = None
+
+
+class PRDQAResponse(BaseModel):
+    answer: str
+    context_entries: list["KnowledgeBaseContextItem"] = Field(default_factory=list)
+    used_versions: list[int] = Field(default_factory=list)
+    verification: VerificationDetails | None = None
 
 
 # ---------------------------------------------------------
@@ -84,6 +159,7 @@ class RoadmapGenerateResponse(BaseModel):
     suggestions: list[str] | None = None
     context_entries: list["KnowledgeBaseContextItem"] | None = None
     kb_entry_id: UUID | None = None
+    verification: VerificationDetails | None = None
 
 
 class RoadmapChatTurnRequest(BaseModel):
@@ -112,6 +188,149 @@ class RoadmapChatResponse(RoadmapChatRecord):
     action: str
     suggestions: list[str] | None = None
     kb_entry_id: UUID | None = None
+    verification: VerificationDetails | None = None
+
+
+class RoadmapPhaseCreate(BaseModel):
+    title: str
+    description: str | None = None
+    order_index: int | None = None
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    status: str | None = None
+
+
+class RoadmapPhaseUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    order_index: int | None = None
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    status: str | None = None
+
+
+class RoadmapMilestoneCreate(BaseModel):
+    title: str
+    description: str | None = None
+    due_date: datetime | None = None
+    status: str | None = None
+    order_index: int | None = None
+
+
+class RoadmapMilestoneUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    due_date: datetime | None = None
+    status: str | None = None
+    order_index: int | None = None
+    ai_summary: str | None = None
+
+
+class RoadmapLinkedTask(BaseModel):
+    id: UUID
+    title: str
+    status: TaskStatusLiteral
+    assignee_id: UUID | None = None
+    due_date: datetime | None = None
+    project_id: UUID | None = None
+
+
+class RoadmapMilestoneResponse(BaseModel):
+    id: UUID
+    phase_id: UUID
+    title: str
+    description: str | None = None
+    due_date: datetime | None = None
+    status: str
+    order_index: int
+    progress_percent: float
+    linked_tasks: list[RoadmapLinkedTask] = Field(default_factory=list)
+    ai_summary: str | None = None
+
+
+class RoadmapPhaseResponse(BaseModel):
+    id: UUID
+    title: str
+    description: str | None = None
+    order_index: int
+    status: str
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    progress_percent: float
+    milestones: list[RoadmapMilestoneResponse] = Field(default_factory=list)
+
+
+class RoadmapMilestoneTaskLinkRequest(BaseModel):
+    task_id: UUID
+    action: Literal["link", "unlink"] = "link"
+
+
+class RoadmapProgressMilestone(BaseModel):
+    id: UUID
+    title: str
+    progress_percent: float
+    total_tasks: int
+    completed_tasks: int
+
+
+class RoadmapProgressPhase(BaseModel):
+    phase_id: UUID
+    title: str
+    progress_percent: float
+    total_tasks: int
+    completed_tasks: int
+    milestones: list[RoadmapProgressMilestone] = Field(default_factory=list)
+
+
+class RoadmapProgressResponse(BaseModel):
+    project_id: UUID
+    phases: list[RoadmapProgressPhase]
+    overall_progress: float
+    total_tasks: int
+    completed_tasks: int
+
+
+class RoadmapRetrospectiveResponse(BaseModel):
+    phase_id: UUID
+    summary: str
+    went_well: list[str]
+    needs_improvement: list[str]
+    lessons: list[str]
+    generated_at: datetime
+
+
+class RoadmapAIUpdateItem(BaseModel):
+    milestone_id: UUID
+    phase_id: UUID | None = None
+    order_index: int | None = None
+    due_date: datetime | None = None
+    status: str | None = None
+
+
+class RoadmapReprioritizeSuggestion(BaseModel):
+    suggestion_id: UUID
+    title: str
+    summary: str
+    impact: str | None = None
+    milestone_id: UUID | None = None
+    recommended_phase_id: UUID | None = None
+    recommended_order_index: int | None = None
+    recommended_status: str | None = None
+    updates: list[RoadmapAIUpdateItem] = Field(default_factory=list)
+
+
+class RoadmapAIUpdateRequest(BaseModel):
+    updates: list[RoadmapAIUpdateItem]
+
+
+class RoadmapExecutionInsights(BaseModel):
+    project_id: UUID
+    overall_progress: float
+    phase_summaries: list[RoadmapProgressPhase]
+    blockers: list[str]
+    velocity_last_7_days: int
+    ai_summary: str
+    suggestions: list[RoadmapReprioritizeSuggestion] = Field(default_factory=list)
 
 
 class BuilderChatMessage(BaseModel):
@@ -167,7 +386,6 @@ class BuilderPrototypeResponse(BaseModel):
     created_at: datetime
 
 
-TaskStatusLiteral = Literal["todo", "in_progress", "done"]
 TaskPriorityLiteral = Literal["low", "medium", "high", "critical"]
 
 
@@ -395,6 +613,16 @@ class GoogleAuthRequest(BaseModel):
     credential: str
 
 
+class AuthInitializeRequest(BaseModel):
+    user_id: UUID
+
+
+class AuthInitializeResponse(BaseModel):
+    workspace_id: UUID
+    project_id: UUID | None = None
+    has_demo: bool = False
+
+
 class WorkspaceResponse(BaseModel):
     id: UUID
     name: str
@@ -457,6 +685,9 @@ class WorkspaceInvitationAcceptRequest(BaseModel):
 class WorkspaceAIProviderStatus(BaseModel):
     provider: Literal["openai"]
     is_enabled: bool
+    has_api_key: bool
+    masked_key_preview: str | None = None
+    key_suffix: str | None = None
     updated_at: datetime | None = None
     updated_by: UUID | None = None
 
@@ -471,10 +702,11 @@ class WorkspaceAIProviderSave(BaseModel):
 
 class WorkspaceAIProviderTestRequest(BaseModel):
     provider: Literal["openai"] = "openai"
-    api_key: str
+    api_key: str | None = None
     organization: str | None = None
     project: str | None = None
     user_id: UUID
+    use_saved_key: bool = False
 
 
 class WorkspaceAIProviderTestResponse(BaseModel):
@@ -549,6 +781,7 @@ class WorkspaceInsightResponse(BaseModel):
     metrics: DashboardOverviewResponse
     context_entries: list["KnowledgeBaseContextItem"] = Field(default_factory=list)
     generated_at: datetime
+    verification: VerificationDetails | None = None
 
 
 class WorkspaceInsightRegenerateRequest(BaseModel):
@@ -576,6 +809,63 @@ class WorkspaceChatTurnResponse(BaseModel):
     messages: list[WorkspaceChatMessage]
     context_entries: list["KnowledgeBaseContextItem"] = Field(default_factory=list)
     updated_at: datetime
+    verification: VerificationDetails | None = None
+
+
+# ---------------------------------------------------------
+# Strategy Hub
+# ---------------------------------------------------------
+
+
+class StrategicPillar(BaseModel):
+    id: UUID
+    title: str
+    description: str | None = None
+    progress_percent: float = 0.0
+    related_prds: list[dict[str, Any]] = Field(default_factory=list)
+    related_roadmaps: list[dict[str, Any]] = Field(default_factory=list)
+    related_tasks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class StrategicInsight(BaseModel):
+    id: UUID
+    title: str
+    description: str
+    severity: str | None = None
+    source_type: str | None = None
+    source_id: UUID | None = None
+    suggested_action: str | None = None
+    impact_score: float | None = None
+
+
+class StrategySummary(BaseModel):
+    narrative: str
+    focus_areas: list[str] = Field(default_factory=list)
+    forecast: str
+    health_score: float | None = None
+
+
+class StrategyOverviewResponse(BaseModel):
+    pillars: list[StrategicPillar]
+    insights: list[StrategicInsight]
+    summary: StrategySummary
+    updated_at: datetime
+
+
+class StrategyRegenerateRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+
+
+class StrategyAskRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    question: str
+
+
+class StrategyAskResponse(BaseModel):
+    answer: str
+    context_used: dict[str, Any]
 
 
 # ---------------------------------------------------------
@@ -639,6 +929,7 @@ class KnowledgeBaseContextItem(BaseModel):
     title: str
     type: KnowledgeBaseEntryType
     snippet: str
+    marker: str | None = None
 
 
 class ProjectMemberResponse(BaseModel):

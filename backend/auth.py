@@ -4,9 +4,11 @@ from sqlalchemy import or_
 import base64
 import hashlib
 import hmac
+import json
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 import requests
 
 from .database import get_db
@@ -18,6 +20,85 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 GOOGLE_TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+DEMO_WORKSPACE_NAME = "Demo Workspace"
+DEMO_PROJECT_TITLE = "Launch the Unified PM Hub"
+DEMO_PROJECT_DESCRIPTION = "Centralized hub for planning, prioritization, and shipping with an AI copilot."
+DEMO_PROJECT_GOALS = "Highlight AI-assisted workflows, keep demo data in sync, and guide PMs to value quickly."
+DEMO_PROJECT_PERSONAS = ["Product Managers", "Delivery Leads"]
+DEMO_PRD_CONTENT = """# Unified PM Hub — Demo PRD
+
+## Executive Summary
+PM Assist helps PMs move ideas to execution faster. This demo space shows how PRDs, roadmaps, and Kanban stay connected with AI.
+
+## Goals
+- Showcase AI Coach and template workflows
+- Provide a safe sandbox for exploring rituals
+- Encourage creating a first project with AI
+
+## Functional Requirements
+1. Demo PRD with a structured outline
+2. Roadmap split into MVP vs Phase 2
+3. Kanban tasks mapped to roadmap items
+4. Quick CTA to talk with the AI Coach
+
+## Success Metrics
+- Time-to-first-insight under 5 minutes
+- At least two AI interactions
+- User launches their own project from a template
+
+## Launch Considerations
+- Make it clear demo data is safe to explore
+- Encourage inviting teammates after confidence
+- Remind users they can ask the AI Coach anything"""
+DEMO_ROADMAP = {
+    "mvp": [
+        {
+            "title": "Guided walkthrough",
+            "description": "Surface onboarding tips so PMs know where to click first.",
+            "status": "in-progress",
+        },
+        {
+            "title": "Template-powered PRD creation",
+            "description": "Pair templates with AI prompts to auto-generate specs.",
+            "status": "in-progress",
+        },
+    ],
+    "phase_2": [
+        {
+            "title": "Team invites + collaboration",
+            "description": "Prompt users to bring in Eng + Design once ready.",
+            "status": "planned",
+        },
+        {
+            "title": "Live integrations",
+            "description": "Connect Jira, Slack, and Notion actions from AI Coach.",
+            "status": "planned",
+        },
+    ],
+}
+DEMO_TASKS = [
+    {
+        "title": "Explore the demo PRD",
+        "description": "Review the sample spec to see how AI fills in each section.",
+        "status": "todo",
+        "priority": "medium",
+        "due_in_days": 1,
+    },
+    {
+        "title": "Review the roadmap milestones",
+        "description": "Check how MVP vs Phase 2 items are organized and edit freely.",
+        "status": "in_progress",
+        "priority": "medium",
+        "due_in_days": 2,
+    },
+    {
+        "title": "Complete your first Kanban card",
+        "description": "Drag a task to Done to see the workflow update instantly.",
+        "status": "done",
+        "priority": "low",
+        "due_in_days": 0,
+    },
+]
 
 
 def _hash_password(password: str) -> str:
@@ -180,6 +261,37 @@ def google_login(payload: schemas.GoogleAuthRequest, db: Session = Depends(get_d
     return _auth_response_for_user(db, user, workspace_hint=workspace)
 
 
+@router.post("/initialize", response_model=schemas.AuthInitializeResponse)
+def initialize_demo(payload: schemas.AuthInitializeRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == payload.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    workspace = get_current_workspace(db, user.id)
+    created_workspace = False
+    if workspace is None:
+        workspace = create_workspace_with_owner(db, name=DEMO_WORKSPACE_NAME, owner_id=user.id)
+        created_workspace = True
+
+    project = (
+        db.query(models.Project)
+        .filter(models.Project.workspace_id == workspace.id)
+        .order_by(models.Project.created_at.asc())
+        .first()
+    )
+
+    has_demo = False
+    if created_workspace or project is None:
+        project = _create_demo_project(db, workspace.id, user.id)
+        has_demo = True
+
+    return schemas.AuthInitializeResponse(
+        workspace_id=workspace.id,
+        project_id=project.id if project else None,
+        has_demo=has_demo,
+    )
+
+
 @router.post("/logout")
 def logout():
     return {"status": "ok"}
@@ -236,3 +348,59 @@ def reset_password(payload: schemas.ResetPasswordRequest, db: Session = Depends(
     db.commit()
 
     return {"status": "password_reset"}
+
+
+def _create_demo_project(db: Session, workspace_id: UUID, user_id: UUID) -> models.Project:
+    project = models.Project(
+        title=DEMO_PROJECT_TITLE,
+        description=DEMO_PROJECT_DESCRIPTION,
+        goals=DEMO_PROJECT_GOALS,
+        north_star_metric="Activated demo users",
+        target_personas=DEMO_PROJECT_PERSONAS,
+        workspace_id=workspace_id,
+    )
+    db.add(project)
+    db.flush()
+
+    db.add(models.ProjectMember(project_id=project.id, user_id=user_id, role="owner"))
+
+    prd = models.PRD(
+        project_id=project.id,
+        workspace_id=workspace_id,
+        feature_name="Unified PM Hub",
+        description=DEMO_PROJECT_DESCRIPTION,
+        goals=DEMO_PROJECT_GOALS,
+        content=DEMO_PRD_CONTENT,
+    )
+    db.add(prd)
+
+    roadmap = models.Roadmap(
+        project_id=project.id,
+        workspace_id=workspace_id,
+        content=json.dumps(DEMO_ROADMAP, indent=2),
+    )
+    db.add(roadmap)
+
+    now = datetime.now(timezone.utc)
+    created_tasks: list[models.Task] = []
+    for spec in DEMO_TASKS:
+        due_date = None
+        offset = spec.get("due_in_days")
+        if isinstance(offset, int):
+            due_date = now + timedelta(days=offset)
+        created_tasks.append(
+            models.Task(
+                workspace_id=workspace_id,
+                project_id=project.id,
+                title=spec["title"],
+                description=spec.get("description"),
+                status=spec["status"],
+                priority=spec["priority"],
+                due_date=due_date,
+                created_by=user_id,
+            )
+        )
+    db.add_all(created_tasks)
+    db.commit()
+    db.refresh(project)
+    return project

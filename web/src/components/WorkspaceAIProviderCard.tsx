@@ -34,8 +34,10 @@ export default function WorkspaceAIProviderCard({
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testingSaved, setTestingSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [isReplacing, setIsReplacing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +46,7 @@ export default function WorkspaceAIProviderCard({
   useEffect(() => {
     if (!workspaceId || !userId) {
       setStatus(null);
+      setIsReplacing(false);
       return;
     }
     let cancelled = false;
@@ -53,6 +56,11 @@ export default function WorkspaceAIProviderCard({
       .then((data) => {
         if (!cancelled) {
           setStatus(data);
+          if (!data.has_api_key) {
+            setIsReplacing(true);
+          } else {
+            setIsReplacing(false);
+          }
         }
       })
       .catch((err: any) => {
@@ -87,7 +95,7 @@ export default function WorkspaceAIProviderCard({
     if (!canConfigure || !requireContext()) return;
     const apiKey = form.api_key.trim();
     if (!apiKey) {
-      setError("Enter an OpenAI API key before testing.");
+      setError(status?.has_api_key ? "Enter a key or use Test saved key to verify the stored credentials." : "Enter an OpenAI API key before testing.");
       return;
     }
     setTesting(true);
@@ -105,6 +113,28 @@ export default function WorkspaceAIProviderCard({
       setError(err.message || "Unable to verify OpenAI credentials.");
     } finally {
       setTesting(false);
+    }
+  };
+
+  const handleTestSaved = async () => {
+    if (!canConfigure || !requireContext()) return;
+    if (!status?.has_api_key) {
+      setError("No saved OpenAI key to test.");
+      return;
+    }
+    setTestingSaved(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await testWorkspaceAIProvider(workspaceId!, {
+        use_saved_key: true,
+        user_id: userId!,
+      });
+      setMessage("Saved OpenAI key verified successfully.");
+    } catch (err: any) {
+      setError(err.message || "Unable to verify the saved OpenAI key.");
+    } finally {
+      setTestingSaved(false);
     }
   };
 
@@ -127,6 +157,7 @@ export default function WorkspaceAIProviderCard({
       });
       setStatus(response);
       setForm(emptyForm);
+      setIsReplacing(false);
       setMessage("Custom OpenAI key saved for this workspace.");
     } catch (err: any) {
       setError(err.message || "Unable to save AI credentials.");
@@ -136,13 +167,20 @@ export default function WorkspaceAIProviderCard({
   };
 
   const handleRemove = async () => {
-    if (!canConfigure || !requireContext() || !status?.is_enabled) return;
+    if (!canConfigure || !requireContext() || !status?.has_api_key) return;
     setRemoving(true);
     setMessage(null);
     setError(null);
     try {
       await deleteWorkspaceAIProvider(workspaceId!, userId!);
-      setStatus({ provider: "openai", is_enabled: false });
+      setStatus({
+        provider: "openai",
+        is_enabled: false,
+        has_api_key: false,
+        masked_key_preview: null,
+        key_suffix: null,
+      });
+      setIsReplacing(true);
       setMessage("Workspace reverted to the default OpenAI key.");
     } catch (err: any) {
       setError(err.message || "Unable to remove the saved key.");
@@ -151,8 +189,8 @@ export default function WorkspaceAIProviderCard({
     }
   };
 
-  const pillarLabel = status?.is_enabled ? "Custom key active" : "Using default key";
-  const pillarStyle = status?.is_enabled
+  const pillarLabel = status?.has_api_key ? "Custom key active" : "Using default key";
+  const pillarStyle = status?.has_api_key
     ? "bg-emerald-50 text-emerald-700"
     : "bg-slate-100 text-slate-500";
 
@@ -208,12 +246,20 @@ export default function WorkspaceAIProviderCard({
                   value={form.api_key}
                   onChange={handleInputChange("api_key")}
                   placeholder="sk-live-..."
-                  disabled={!canConfigure || saving}
+                  disabled={!canConfigure || saving || (status?.has_api_key && !isReplacing)}
                   className="rounded-2xl border border-slate-200 px-4 py-2 text-sm focus:border-slate-500 focus:outline-none"
                 />
               </label>
               <p className="mt-1 text-xs text-slate-400">
-                We never display saved keys. Paste a new key whenever you need to rotate it.
+                {status?.has_api_key && status.key_suffix && !isReplacing ? (
+                  <>
+                    Saved key ends with{" "}
+                    <span className="font-semibold text-slate-600">{status.key_suffix}</span>. Use “Test saved key”
+                    to verify it anytime.
+                  </>
+                ) : (
+                  "We never display saved keys. Paste a new key whenever you need to rotate it."
+                )}
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
@@ -224,7 +270,7 @@ export default function WorkspaceAIProviderCard({
                   value={form.organization}
                   onChange={handleInputChange("organization")}
                   placeholder="org-..."
-                  disabled={!canConfigure || saving}
+                  disabled={!canConfigure || saving || (status?.has_api_key && !isReplacing)}
                   className="rounded-2xl border border-slate-200 px-4 py-2 text-sm focus:border-slate-500 focus:outline-none"
                 />
               </label>
@@ -235,29 +281,57 @@ export default function WorkspaceAIProviderCard({
                   value={form.project}
                   onChange={handleInputChange("project")}
                   placeholder="proj_..."
-                  disabled={!canConfigure || saving}
+                  disabled={!canConfigure || saving || (status?.has_api_key && !isReplacing)}
                   className="rounded-2xl border border-slate-200 px-4 py-2 text-sm focus:border-slate-500 focus:outline-none"
                 />
               </label>
             </div>
             <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleTest}
-                disabled={!canConfigure || testing}
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-              >
-                {testing ? "Testing..." : "Test connection"}
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={!canConfigure || saving}
-                className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50"
-              >
-                {saving ? "Saving..." : "Save key"}
-              </button>
-              {status?.is_enabled && (
+              {(!status?.has_api_key || isReplacing) && (
+                <button
+                  type="button"
+                  onClick={handleTest}
+                  disabled={!canConfigure || testing}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {testing ? "Testing..." : "Test connection"}
+                </button>
+              )}
+              {status?.has_api_key && !isReplacing && (
+                <button
+                  type="button"
+                  onClick={handleTestSaved}
+                  disabled={!canConfigure || testingSaved}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {testingSaved ? "Testing saved key..." : "Test saved key"}
+                </button>
+              )}
+              {(status?.has_api_key && !isReplacing && canConfigure) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsReplacing(true);
+                    setForm(emptyForm);
+                    setMessage(null);
+                    setError(null);
+                  }}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                >
+                  Replace key
+                </button>
+              )}
+              {(!status?.has_api_key || isReplacing) && (
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={!canConfigure || saving}
+                  className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : "Save key"}
+                </button>
+              )}
+              {status?.has_api_key && !isReplacing && (
                 <button
                   type="button"
                   onClick={handleRemove}
@@ -265,6 +339,20 @@ export default function WorkspaceAIProviderCard({
                   className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
                 >
                   {removing ? "Removing..." : "Remove custom key"}
+                </button>
+              )}
+              {isReplacing && status?.has_api_key && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsReplacing(false);
+                    setForm(emptyForm);
+                    setMessage(null);
+                    setError(null);
+                  }}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                >
+                  Cancel
                 </button>
               )}
             </div>

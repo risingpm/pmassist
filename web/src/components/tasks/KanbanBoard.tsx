@@ -1,6 +1,9 @@
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { TaskRecord, TaskStatus } from "../../api";
+import { SURFACE_CARD, SECTION_LABEL, PILL_META } from "../../styles/theme";
+
+export const KANBAN_STATUSES: TaskStatus[] = ["todo", "in_progress", "done"];
 
 const STATUS_COLUMNS: Record<TaskStatus, { title: string; accent: string }> = {
   todo: { title: "To Do", accent: "border-slate-200" },
@@ -8,17 +11,25 @@ const STATUS_COLUMNS: Record<TaskStatus, { title: string; accent: string }> = {
   done: { title: "Done", accent: "border-emerald-300" },
 };
 
+export type KanbanMovePayload = {
+  taskId: string;
+  sourceStatus: TaskStatus;
+  destinationStatus: TaskStatus;
+  sourceIndex: number;
+  destinationIndex: number;
+};
+
 type KanbanBoardProps = {
   tasks: TaskRecord[];
-  onStatusChange: (taskId: string, status: TaskStatus) => void;
+  onMoveTask: (payload: KanbanMovePayload) => void;
   onSelectTask?: (task: TaskRecord) => void;
   canDrag?: boolean;
 };
 
-export default function KanbanBoard({ tasks, onStatusChange, onSelectTask, canDrag = true }: KanbanBoardProps) {
-  const grouped = Object.entries(STATUS_COLUMNS).reduce<Record<TaskStatus, TaskRecord[]>>(
-    (acc, [status]) => {
-      acc[status as TaskStatus] = tasks.filter((task) => task.status === status);
+export default function KanbanBoard({ tasks, onMoveTask, onSelectTask, canDrag = true }: KanbanBoardProps) {
+  const grouped = KANBAN_STATUSES.reduce<Record<TaskStatus, TaskRecord[]>>(
+    (acc, status) => {
+      acc[status] = tasks.filter((task) => task.status === status);
       return acc;
     },
     { todo: [], in_progress: [], done: [] }
@@ -30,32 +41,44 @@ export default function KanbanBoard({ tasks, onStatusChange, onSelectTask, canDr
     const { draggableId, destination, source } = result;
     const destinationStatus = destination.droppableId as TaskStatus;
     const sourceStatus = source.droppableId as TaskStatus;
-    if (destinationStatus === sourceStatus) return;
-    onStatusChange(draggableId, destinationStatus);
+    if (destinationStatus === sourceStatus && destination.index === source.index) return;
+    onMoveTask({
+      taskId: draggableId,
+      sourceStatus,
+      destinationStatus,
+      sourceIndex: source.index,
+      destinationIndex: destination.index,
+    });
   };
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
       <div className="grid gap-4 md:grid-cols-3">
-        {(Object.keys(STATUS_COLUMNS) as TaskStatus[]).map((status) => {
+        {KANBAN_STATUSES.map((status) => {
           const column = STATUS_COLUMNS[status];
           return (
-            <div key={status} className="flex flex-col rounded-3xl border border-white/5 bg-white p-4 shadow-sm">
+            <div key={status} className={`${SURFACE_CARD} flex flex-col p-4`}>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-700">{column.title}</p>
-                <span className="text-xs text-slate-400">{grouped[status].length}</span>
+                <p className={SECTION_LABEL}>{column.title}</p>
+                <span className={PILL_META}>{grouped[status].length}</span>
               </div>
               <Droppable droppableId={status}>
                 {(provided, snapshot) => (
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
-                    className={`mt-3 flex-1 rounded-2xl border border-dashed bg-slate-50/70 p-3 transition ${
-                      snapshot.isDraggingOver ? "border-slate-400 bg-slate-100" : column.accent
+                    className={`mt-3 flex-1 rounded-2xl border border-dashed bg-slate-50/80 p-3 transition ${
+                      snapshot.isDraggingOver ? "border-blue-300 bg-white" : column.accent
                     }`}
                   >
                     {grouped[status].map((task, index) => (
-                      <Draggable key={task.id} draggableId={task.id} index={index} isDragDisabled={!canDrag}>
+                      <Draggable
+                        key={task.id}
+                        draggableId={task.id}
+                        index={index}
+                        isDragDisabled={!canDrag}
+                        disableInteractiveElementBlocking
+                      >
                         {(draggableProvided) => (
                           <button
                             type="button"

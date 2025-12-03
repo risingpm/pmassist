@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import PrototypeCard from "../../components/PrototypeCard";
 import { listBuilderPrototypes, type BuilderPrototypeRecord } from "../../api";
-import { USER_ID_KEY, WORKSPACE_ID_KEY } from "../../constants";
+import { USER_ID_KEY, WORKSPACE_ID_KEY, WIDE_PAGE_CONTAINER } from "../../constants";
+import { SECTION_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, BODY_SUBTLE } from "../../styles/theme";
 
 export default function PrototypesPage() {
   const navigate = useNavigate();
@@ -29,34 +30,63 @@ export default function PrototypesPage() {
     run();
   }, [workspaceId, userId]);
 
+  const navItems = useMemo(() => {
+    if (!workspaceId) return [];
+    return [
+      { label: "Dashboard", path: `/workspaces/${workspaceId}/dashboard`, active: false },
+      { label: "Projects", path: `/workspaces/${workspaceId}/projects`, active: false },
+      { label: "Builder", path: `/workspaces/${workspaceId}/builder`, active: false },
+      { label: "Prototypes", path: `/workspaces/${workspaceId}/prototypes`, active: true },
+    ];
+  }, [workspaceId]);
+
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-5xl px-6 py-10">
-        <button
-          onClick={() => navigate(-1)}
-          className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-300"
-        >
-          ⬅ Back
-        </button>
-        <div className="mt-6 flex items-center justify-between">
+      <div className={`${WIDE_PAGE_CONTAINER} space-y-6 py-8`}>
+        <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold text-slate-900">Saved Prototypes</h1>
-            <p className="text-sm text-slate-500">All builder outputs saved to this workspace.</p>
+            <p className={SECTION_LABEL}>Workspace prototypes</p>
+            <h1 className="text-3xl font-semibold text-slate-900">Saved Builder outputs</h1>
+            <p className={BODY_SUBTLE}>All generative prototypes created under this workspace.</p>
           </div>
-          {workspaceId && (
+          <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={() => navigate(`/workspaces/${workspaceId}/builder`)}
-              className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+              type="button"
+              onClick={() => navigate(workspaceId ? `/workspaces/${workspaceId}/builder` : "/builder")}
+              className={PRIMARY_BUTTON}
             >
               Open Builder
             </button>
-          )}
-        </div>
-        {error && <p className="mt-4 text-sm text-rose-500">{error}</p>}
+            <button type="button" onClick={() => navigate(-1)} className={SECONDARY_BUTTON}>
+              Back
+            </button>
+          </div>
+        </header>
+
+        {navItems.length > 0 && (
+          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+            {navItems.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => navigate(item.path)}
+                className={`rounded-full px-4 py-2 ${
+                  item.active ? "bg-slate-900 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="text-sm text-rose-500">{error}</p>}
         {prototypes.length === 0 ? (
-          <p className="mt-8 text-sm text-slate-500">No prototypes yet.</p>
+          <div className="rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-8 text-center text-sm text-slate-500">
+            No prototypes yet. Launch the Builder to create one.
+          </div>
         ) : (
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
             {prototypes.map((prototype) => (
               <PrototypeCard
                 key={prototype.id}

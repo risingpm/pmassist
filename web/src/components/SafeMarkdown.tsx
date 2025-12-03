@@ -2,6 +2,7 @@ import { marked } from "marked";
 
 interface SafeMarkdownProps {
   children: string;
+  className?: string;
 }
 
 marked.setOptions({
@@ -9,13 +10,8 @@ marked.setOptions({
   breaks: true,
 });
 
-export default function SafeMarkdown({ children }: SafeMarkdownProps) {
+export default function SafeMarkdown({ children, className = "" }: SafeMarkdownProps) {
   const content = typeof children === "string" ? children : String(children ?? "");
   const html = marked.parse(content || "");
-  return (
-    <div
-      className="markdown-body"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
+  return <div className={`markdown-body ${className}`} dangerouslySetInnerHTML={{ __html: html }} />;
 }
