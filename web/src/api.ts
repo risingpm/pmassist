@@ -843,6 +843,99 @@ export type WorkspaceMemoryUpdatePayload = {
   importance?: number | null;
 };
 
+export type WorkspaceAgent = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  purpose?: string | null;
+  instructions: string;
+  tone?: string | null;
+  model_name: string;
+  temperature: number;
+  max_tokens?: number | null;
+  modules: string[];
+  tools: Record<string, any>;
+  mcp_connection_ids: string[];
+  avatar_url?: string | null;
+  accent_color?: string | null;
+  is_public?: boolean | null;
+  created_by?: string | null;
+  shared_at?: string | null;
+  cloned_from_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkspaceAgentPayload = {
+  name: string;
+  description?: string | null;
+  purpose?: string | null;
+  instructions: string;
+  tone?: string | null;
+  model_name?: string;
+  temperature?: number;
+  max_tokens?: number | null;
+  modules?: string[];
+  tools?: Record<string, any>;
+  mcp_connection_ids?: string[];
+  avatar_url?: string | null;
+  accent_color?: string | null;
+  is_public?: boolean;
+};
+
+export type WorkspaceAgentUpdatePayload = Partial<WorkspaceAgentPayload>;
+
+export type MCPConnection = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  endpoint_url: string;
+  tool_name: string;
+  prompt_field: string;
+  context_field?: string | null;
+  default_arguments: Record<string, unknown>;
+  has_token: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MCPConnectionPayload = {
+  name: string;
+  description?: string | null;
+  endpoint_url: string;
+  tool_name: string;
+  prompt_field?: string;
+  context_field?: string | null;
+  default_arguments?: Record<string, unknown>;
+  auth_token?: string | null;
+};
+
+export type MCPConnectionUpdatePayload = Partial<Omit<MCPConnectionPayload, "auth_token">> & {
+  auth_token?: string | null;
+  clear_auth_token?: boolean;
+};
+
+export type AgentRunLog = {
+  id: string;
+  agent_id: string;
+  prompt: string;
+  response?: string | null;
+  status: "completed" | "error";
+  created_at: string;
+};
+
+export type AgentRunResponse = {
+  run_id: string;
+  agent_id: string;
+  response: string;
+  context_used: KnowledgeBaseContextItem[];
+  status: "completed" | "error";
+  created_at: string;
+};
+
+
 export type WorkspaceChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -2167,6 +2260,207 @@ export async function listWorkspaceMemory(
   return res.json();
 }
 
+export async function getWorkspaceAgents(workspaceId: string): Promise<WorkspaceAgent[]> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents`, workspaceId));
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load agents");
+  }
+  return res.json();
+}
+
+export async function createWorkspaceAgent(
+  workspaceId: string,
+  payload: WorkspaceAgentPayload
+): Promise<WorkspaceAgent> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to create agent");
+  }
+  return res.json();
+}
+
+export async function updateWorkspaceAgent(
+  workspaceId: string,
+  agentId: string,
+  payload: WorkspaceAgentUpdatePayload
+): Promise<WorkspaceAgent> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}`, workspaceId),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to update agent");
+  }
+  return res.json();
+}
+
+export async function shareWorkspaceAgent(workspaceId: string, agentId: string): Promise<WorkspaceAgent> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}/share`, workspaceId),
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to share agent");
+  }
+  return res.json();
+}
+
+export async function listMcpConnections(workspaceId: string): Promise<MCPConnection[]> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/mcp-connections`, workspaceId));
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load MCP connections");
+  }
+  return res.json();
+}
+
+export async function createMcpConnection(
+  workspaceId: string,
+  payload: MCPConnectionPayload
+): Promise<MCPConnection> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/mcp-connections`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to create MCP connection");
+  }
+  return res.json();
+}
+
+export async function updateMcpConnection(
+  workspaceId: string,
+  connectionId: string,
+  payload: MCPConnectionUpdatePayload
+): Promise<MCPConnection> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/mcp-connections/${connectionId}`, workspaceId),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to update MCP connection");
+  }
+  return res.json();
+}
+
+export async function deleteMcpConnection(workspaceId: string, connectionId: string): Promise<void> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/mcp-connections/${connectionId}`, workspaceId),
+    { method: "DELETE" }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to delete MCP connection");
+  }
+}
+
+export async function cloneWorkspaceAgent(workspaceId: string, agentId: string): Promise<WorkspaceAgent> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}/clone`, workspaceId),
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to clone agent");
+  }
+  return res.json();
+}
+
+export async function getAgentTemplates(): Promise<WorkspaceAgent[]> {
+  const res = await fetch(`${API_BASE}/agents/templates`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load templates");
+  }
+  return res.json();
+}
+
+export async function runWorkspaceAgent(
+  workspaceId: string,
+  agentId: string,
+  payload: { prompt: string; project_id?: string }
+): Promise<AgentRunResponse> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}/run`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Agent run failed");
+  }
+  return res.json();
+}
+
+export async function getAgentRunHistory(
+  workspaceId: string,
+  agentId: string
+): Promise<AgentRunLog[]> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}/runs`, workspaceId)
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load run history");
+  }
+  return res.json();
+}
+
+export async function getProjectAgents(workspaceId: string, projectId: string) {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/projects/${projectId}/agents`, workspaceId)
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load project agents");
+  }
+  return res.json() as Promise<WorkspaceAgent[]>;
+}
+
+export async function assignProjectAgents(
+  workspaceId: string,
+  projectId: string,
+  agentIds: string[]
+): Promise<WorkspaceAgent[]> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/projects/${projectId}/agents`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_ids: agentIds }),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to assign agents");
+  }
+  return res.json();
+}
+
 export async function createWorkspaceMemory(
   workspaceId: string,
   payload: WorkspaceMemoryCreatePayload
@@ -2241,6 +2535,22 @@ export type WorkspaceSummary = {
   role?: WorkspaceRole | null;
 };
 
+export type WorkspaceOnboardingStep = {
+  id: "complete_profile" | "create_project" | "add_team_members" | "generate_prd";
+  completed: boolean;
+};
+
+export type WorkspaceOnboardingStatus = {
+  workspace_id: string;
+  workspace_name: string;
+  user_name?: string | null;
+  welcome_acknowledged: boolean;
+  steps: WorkspaceOnboardingStep[];
+  completed_steps: number;
+  total_steps: number;
+  next_step_id?: WorkspaceOnboardingStep["id"] | null;
+};
+
 export async function getUserWorkspaces(userId: string, signal?: AbortSignal): Promise<WorkspaceSummary[]> {
   const res = await fetch(`${API_BASE}/users/${userId}/workspaces`, { signal });
   if (!res.ok) throw new Error("Failed to fetch workspaces");
@@ -2256,6 +2566,41 @@ export async function createWorkspace(payload: { name: string; owner_id: string 
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to create workspace");
+  }
+  return res.json();
+}
+
+export async function getWorkspaceOnboardingStatus(
+  workspaceId: string,
+  userId?: string | null
+): Promise<WorkspaceOnboardingStatus> {
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId(userId));
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/onboarding?${params.toString()}`, {
+    method: "GET",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load onboarding status");
+  }
+  return res.json();
+}
+
+export async function updateWorkspaceOnboardingStatus(
+  workspaceId: string,
+  payload: { welcome_acknowledged?: boolean },
+  userId?: string | null
+): Promise<WorkspaceOnboardingStatus> {
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId(userId));
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/onboarding?${params.toString()}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to update onboarding status");
   }
   return res.json();
 }

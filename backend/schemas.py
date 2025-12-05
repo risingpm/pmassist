@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, AnyUrl
 from typing import Optional, Literal, Any
 from datetime import datetime
 from uuid import UUID
@@ -586,6 +586,128 @@ class AgentResponse(AgentBase):
         from_attributes = True
 
 
+class WorkspaceAgentBase(BaseModel):
+    name: str
+    description: str | None = None
+    purpose: str | None = None
+    instructions: str
+    tone: str | None = None
+    model_name: str = "gpt-4o-mini"
+    temperature: float = 0.3
+    max_tokens: int | None = None
+    modules: list[str] = Field(default_factory=list)
+    tools: dict[str, Any] = Field(default_factory=dict)
+    mcp_connection_ids: list[UUID] = Field(default_factory=list)
+    avatar_url: str | None = None
+    accent_color: str | None = None
+    is_public: bool | None = None
+
+
+class WorkspaceAgentCreate(WorkspaceAgentBase):
+    pass
+
+
+class WorkspaceAgentUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    purpose: str | None = None
+    instructions: str | None = None
+    tone: str | None = None
+    model_name: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    modules: list[str] | None = None
+    tools: dict[str, Any] | None = None
+    mcp_connection_ids: list[UUID] | None = None
+    avatar_url: str | None = None
+    accent_color: str | None = None
+    is_public: bool | None = None
+
+
+class WorkspaceAgentResponse(WorkspaceAgentBase):
+    id: UUID
+    workspace_id: UUID
+    created_by: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    shared_at: datetime | None = None
+    cloned_from_id: UUID | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class WorkspaceAgentTemplate(WorkspaceAgentResponse):
+    pass
+
+
+class MCPConnectionBase(BaseModel):
+    name: str
+    description: str | None = None
+    endpoint_url: AnyUrl
+    tool_name: str
+    prompt_field: str = "prompt"
+    context_field: str | None = None
+    default_arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPConnectionCreate(MCPConnectionBase):
+    auth_token: str | None = None
+
+
+class MCPConnectionUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    endpoint_url: AnyUrl | None = None
+    tool_name: str | None = None
+    prompt_field: str | None = None
+    context_field: str | None = None
+    default_arguments: dict[str, Any] | None = None
+    auth_token: str | None = None
+    clear_auth_token: bool | None = None
+
+
+class MCPConnectionResponse(MCPConnectionBase):
+    id: UUID
+    workspace_id: UUID
+    has_token: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AgentRunRequest(BaseModel):
+    prompt: str
+    project_id: UUID | None = None
+
+
+class AgentRunResponse(BaseModel):
+    run_id: UUID
+    agent_id: UUID
+    response: str
+    context_used: list["KnowledgeBaseContextItem"]
+    status: Literal["completed", "error"]
+    created_at: datetime
+
+
+class AgentRunLog(BaseModel):
+    id: UUID
+    agent_id: UUID
+    prompt: str
+    response: str | None = None
+    status: Literal["completed", "error"]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectAgentAssignRequest(BaseModel):
+    agent_ids: list[UUID]
+
+
 # ---------------------------------------------------------
 # Auth Schemas
 # ---------------------------------------------------------
@@ -676,6 +798,26 @@ class WorkspaceInvitationResponse(BaseModel):
 
 class WorkspaceInvitationAcceptRequest(BaseModel):
     user_id: UUID
+
+
+class WorkspaceOnboardingStep(BaseModel):
+    id: str
+    completed: bool
+
+
+class WorkspaceOnboardingStatus(BaseModel):
+    workspace_id: UUID
+    workspace_name: str
+    user_name: str | None = None
+    welcome_acknowledged: bool
+    steps: list[WorkspaceOnboardingStep]
+    completed_steps: int
+    total_steps: int
+    next_step_id: str | None = None
+
+
+class WorkspaceOnboardingUpdate(BaseModel):
+    welcome_acknowledged: bool | None = None
 
 
 # ---------------------------------------------------------

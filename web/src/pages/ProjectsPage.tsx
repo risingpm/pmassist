@@ -85,10 +85,14 @@ export default function ProjectsPage() {
   }, [navigate]);
 
   const userId = typeof window !== "undefined" ? window.sessionStorage.getItem(USER_ID_KEY) : null;
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const selectedProjectId = detailMatch?.params?.projectId ?? null;
   const tabParam = detailMatch?.params?.tab as ProjectTabRoute | undefined;
   const validTabs: ProjectTabRoute[] = ["knowledge", "roadmap", "prototypes", "tasks", "prd", "members", "strategy"];
   const projectDetailTab = tabParam && validTabs.includes(tabParam) ? tabParam : undefined;
+  const focusPrdId = searchParams.get("focus_prd");
+  const focusSectionParam = searchParams.get("focus_section");
+  const focusSection = focusSectionParam === "decision" ? "decision" : undefined;
   const activeView: PanelView = membersMatch ? "workspace-members" : "projects";
   const isProjectsView = activeView === "projects" && !selectedProjectId;
 
@@ -583,6 +587,8 @@ export default function ProjectsPage() {
         workspaceId={workspaceId}
         workspaceRole={workspaceRole}
         initialTab={projectDetailTab}
+        initialFocusedPrdId={focusPrdId}
+        initialFocusSection={focusSection}
         onTabChange={handleProjectTabChange}
         onProjectUpdated={(updated) =>
           setProjects((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)))
@@ -625,6 +631,7 @@ export default function ProjectsPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="flex min-h-screen">
+        {false && (
         <aside className="hidden w-72 flex-shrink-0 flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-sm md:flex">
           <div className="pb-4">
             <p className={SECTION_LABEL}>Workspaces</p>
@@ -685,6 +692,12 @@ export default function ProjectsPage() {
                         className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
                       >
                         Template Library
+                      </button>
+                      <button
+                        onClick={() => navigate(`/workspaces/${ws.id}/agents`)}
+                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
+                      >
+                        Agents
                       </button>
                     </div>
                     <details className="mt-3 rounded-xl border border-slate-200 bg-white/90">
@@ -768,6 +781,7 @@ export default function ProjectsPage() {
             Sign out
           </button>
         </aside>
+        )}
 
         <main className="flex-1 bg-slate-50">
           <div className={`${WIDE_PAGE_CONTAINER} py-6 md:py-10`}>
@@ -833,6 +847,12 @@ export default function ProjectsPage() {
                 className="rounded-full px-4 py-2 bg-white text-slate-600 transition hover:bg-slate-100"
               >
                 Templates
+              </button>
+              <button
+                onClick={() => workspaceId && navigate(`/workspaces/${workspaceId}/agents`)}
+                className="rounded-full px-4 py-2 bg-white text-slate-600 transition hover:bg-slate-100"
+              >
+                Agents
               </button>
             </div>
 

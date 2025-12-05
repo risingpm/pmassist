@@ -53,8 +53,10 @@ class Workspace(Base):
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    onboarding_acknowledged = Column(Boolean, nullable=False, server_default="false")
 
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
+    owner = relationship("User", backref="owned_workspaces")
     projects = relationship("Project", back_populates="workspace", cascade="all, delete-orphan")
     knowledge_base = relationship("KnowledgeBase", back_populates="workspace", cascade="all, delete-orphan", uselist=False)
     ai_credentials = relationship(
@@ -95,6 +97,7 @@ class Workspace(Base):
         back_populates="workspace",
         cascade="all, delete-orphan",
     )
+    ai_agents = relationship("AIAgent", back_populates="workspace", cascade="all, delete-orphan")
 
 
 class WorkspaceMember(Base):
@@ -259,6 +262,7 @@ class Project(Base):
     strategic_pillars = relationship("StrategicPillar", back_populates="project", cascade="all, delete-orphan")
     strategic_insights = relationship("StrategicInsight", back_populates="project", cascade="all, delete-orphan")
     strategic_snapshot = relationship("StrategicSnapshot", back_populates="project", cascade="all, delete-orphan", uselist=False)
+    agent_assignments = relationship("ProjectAgent", back_populates="project", cascade="all, delete-orphan")
 
 
 # ✅ Roadmap Model
@@ -458,6 +462,73 @@ class UserAgent(Base):
     integrations = Column(JSONB, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AIAgent(Base):
+    __tablename__ = "ai_agents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    purpose = Column(Text, nullable=True)
+    tone = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
+    accent_color = Column(String, nullable=True)
+    model_name = Column(String, nullable=False, default="gpt-4o-mini")
+    temperature = Column(Float, nullable=False, default=0.3)
+    max_tokens = Column(Integer, nullable=True)
+    instructions = Column(Text, nullable=False)
+    tools = Column(JSONB, default=dict)
+    modules = Column(ARRAY(String), default=list)
+    mcp_connection_ids = Column(ARRAY(UUID(as_uuid=True)), default=list)
+    is_public = Column(Boolean, nullable=False, default=False)
+    shared_at = Column(DateTime(timezone=True), nullable=True)
+    cloned_from_id = Column(UUID(as_uuid=True), ForeignKey("ai_agents.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", back_populates="ai_agents")
+    creator = relationship("User")
+    cloned_from = relationship("AIAgent", remote_side=[id], backref="clones")
+    project_assignments = relationship("ProjectAgent", back_populates="agent", cascade="all, delete-orphan")
+    runs = relationship("AIAgentRun", back_populates="agent", cascade="all, delete-orphan")
+
+
+class ProjectAgent(Base):
+    __tablename__ = "project_agents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("ai_agents.id", ondelete="CASCADE"), nullable=False)
+    assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="agent_assignments")
+    agent = relationship("AIAgent", back_populates="project_assignments")
+    assigned_user = relationship("User")
+
+
+class AIAgentRun(Base):
+    __tablename__ = "ai_agent_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("ai_agents.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    prompt = Column(Text, nullable=False)
+    response = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="completed")
+    tool_invocations = Column(JSONB, nullable=True)
+    context_entries = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    agent = relationship("AIAgent", back_populates="runs")
+    workspace = relationship("Workspace")
+    project = relationship("Project")
+    user = relationship("User")
 
 
 class PasswordResetToken(Base):
@@ -754,3 +825,24 @@ class StrategicSnapshot(Base):
 
     workspace = relationship("Workspace", back_populates="strategic_snapshots")
     project = relationship("Project", back_populates="strategic_snapshot")
+
+
+class WorkspaceMCPConnection(Base):
+    __tablename__ = "workspace_mcp_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    endpoint_url = Column(String, nullable=False)
+    tool_name = Column(String, nullable=False)
+    prompt_field = Column(String, nullable=False, default="prompt")
+    context_field = Column(String, nullable=True)
+    default_arguments = Column(JSONB, default=dict)
+    auth_token_encrypted = Column(String, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", backref="mcp_connections")

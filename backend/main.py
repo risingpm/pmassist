@@ -14,8 +14,9 @@ from .models import Project
 from . import prd, agent, auth, models
 from .workspaces import workspaces_router, user_workspaces_router
 from . import knowledge_base
-from backend import roadmap_chat, roadmap, roadmap_phases, workspace_memory
+from backend import roadmap_chat, roadmap, roadmap_phases, workspace_memory, workspace_agents
 from backend import templates
+from backend import mcp_connections
 from backend import project_members
 from backend import builder
 from backend import dashboard
@@ -23,6 +24,7 @@ from backend import workspace_ai
 from backend import strategy
 from backend import tasks
 from backend import tasks_ai
+from backend import onboarding
 from backend.rbac import ensure_membership, ensure_project_access
 
 # Create tables if they don’t already exist
@@ -222,6 +224,8 @@ app.include_router(roadmap_chat.router)
 app.include_router(roadmap.router)
 app.include_router(roadmap_phases.router)
 app.include_router(workspace_memory.router)
+app.include_router(workspace_agents.router)
+app.include_router(workspace_agents.templates_router)
 app.include_router(builder.router)
 app.include_router(dashboard.router)
 app.include_router(tasks.workspace_router)
@@ -229,8 +233,10 @@ app.include_router(tasks.task_router)
 app.include_router(tasks_ai.router)
 app.include_router(project_members.router)
 app.include_router(templates.router)
+app.include_router(mcp_connections.router)
 app.include_router(strategy.router)
 app.include_router(workspace_ai.router)
+app.include_router(onboarding.router)
 app.include_router(workspaces_router)
 app.include_router(user_workspaces_router)
 app.include_router(auth.router)
