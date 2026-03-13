@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate, Link, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { getDashboardOverview, type DashboardOverview, type WorkspaceInsight } from "../../api";
-import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, WIDE_PAGE_CONTAINER } from "../../constants";
+import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WIDE_PAGE_CONTAINER } from "../../constants";
 import AgentAvatar from "../../components/AgentAvatar";
 import useAgentName from "../../hooks/useAgentName";
 import useWorkspaceInsights from "../../hooks/useWorkspaceInsights";
@@ -34,10 +34,6 @@ export default function WorkspaceDashboard() {
     if (typeof window === "undefined") return null;
     return window.sessionStorage.getItem(WORKSPACE_ID_KEY);
   }, [routeWorkspaceId]);
-  const workspaceName = useMemo(() => {
-    if (typeof window === "undefined") return "Workspace";
-    return window.sessionStorage.getItem(WORKSPACE_NAME_KEY) || "Workspace";
-  }, []);
 
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
@@ -119,31 +115,8 @@ export default function WorkspaceDashboard() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className={`${WIDE_PAGE_CONTAINER} py-10`}>
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className={SECTION_LABEL}>Workspace overview</p>
-            <h1 className="text-3xl font-semibold text-slate-900">{workspaceName} Dashboard</h1>
-            <p className={BODY_SUBTLE}>Monitor planning, execution, and AI insights across your product stack.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Link to={workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects"} className={SECONDARY_BUTTON}>
-              View Projects
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                if (!workspaceId) return;
-                navigate(`/workspaces/${workspaceId}/projects`);
-              }}
-              className={PRIMARY_BUTTON}
-            >
-              Open Kanban
-            </button>
-          </div>
-        </header>
-
         {quickNavItems.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
             {quickNavItems.map((item) => (
               <button
                 key={item.label}

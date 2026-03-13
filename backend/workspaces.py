@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -9,6 +10,7 @@ from .database import get_db
 from . import models, schemas
 from backend.rbac import ensure_membership, normalize_role, validate_role_input, ROLE_ORDER
 from backend.knowledge_base_service import ensure_workspace_kb
+from backend.agent_defaults import ensure_default_workspace_agents
 from backend.ai_providers import (
     upsert_global_openai_credentials,
     delete_global_openai_credentials,
@@ -16,11 +18,17 @@ from backend.ai_providers import (
     test_openai_credentials,
     decrypt_secret,
 )
+from .email_service import (
+    EmailConfigurationError,
+    EmailDeliveryError,
+    send_workspace_invite_email,
+)
 
 workspaces_router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 user_workspaces_router = APIRouter(prefix="/users", tags=["workspaces"])
 
 INVITE_TTL_DAYS = 14
+logger = logging.getLogger(__name__)
 
 
 def _normalize_email(value: str) -> str:
@@ -48,9 +56,13 @@ def _serialize_member(member: models.WorkspaceMember) -> schemas.WorkspaceMember
 
 
 def _serialize_invitation(invite: models.WorkspaceInvitation) -> schemas.WorkspaceInvitationResponse:
+    workspace_name = None
+    if invite.workspace and invite.workspace.name:
+        workspace_name = invite.workspace.name
     return schemas.WorkspaceInvitationResponse(
         id=invite.id,
         workspace_id=invite.workspace_id,
+        workspace_name=workspace_name,
         email=invite.email,
         role=normalize_role(invite.role),
         token=invite.token,
@@ -71,6 +83,15 @@ def _pending_invites_query(db: Session, workspace_id: UUID):
             models.WorkspaceInvitation.cancelled_at.is_(None),
         )
     )
+
+
+def _delete_invitation_record(db: Session, invitation: models.WorkspaceInvitation):
+    try:
+        db.delete(invitation)
+        db.commit()
+    except Exception:  # pragma: no cover - defensive
+        db.rollback()
+        logger.exception("Failed to clean up workspace invitation %s after email failure", invitation.id)
 
 
 def _serialize_ai_provider_status(
@@ -157,6 +178,7 @@ def create_workspace_with_owner(
     db.commit()
     db.refresh(workspace)
     ensure_workspace_kb(db, workspace.id)
+    ensure_default_workspace_agents(db, workspace)
     return workspace
 
 
@@ -179,6 +201,8 @@ def list_user_workspaces(user_id: UUID, db: Session = Depends(get_db)):
                 created_at=workspace.created_at,
                 updated_at=workspace.updated_at,
                 role=normalize_role(membership.role),
+                billing_plan=workspace.billing_plan or "trial",
+                billing_status=workspace.billing_status or "inactive",
             )
         )
     return results
@@ -199,6 +223,7 @@ def create_workspace(payload: schemas.WorkspaceCreate, owner_id: UUID, db: Sessi
     db.commit()
     db.refresh(workspace)
     ensure_workspace_kb(db, workspace.id)
+    ensure_default_workspace_agents(db, workspace)
     return workspace
 
 
@@ -229,6 +254,8 @@ def update_workspace(
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
         role=ctx.role,
+        billing_plan=workspace.billing_plan or "trial",
+        billing_status=workspace.billing_status or "inactive",
     )
 
 
@@ -430,6 +457,14 @@ def invite_workspace_member(
 ):
     ensure_membership(db, workspace_id, user_id, required_role="admin")
 
+    workspace = (
+        db.query(models.Workspace)
+        .filter(models.Workspace.id == workspace_id)
+        .first()
+    )
+    if not workspace:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
     normalized_email = _normalize_email(payload.email)
     requested_role = validate_role_input(payload.role)
 
@@ -471,6 +506,111 @@ def invite_workspace_member(
     db.add(invite)
     db.commit()
     db.refresh(invite)
+
+    inviter = db.query(models.User).filter(models.User.id == user_id).first()
+    inviter_name = None
+    if inviter:
+        inviter_name = inviter.display_name or inviter.email
+
+    try:
+        send_workspace_invite_email(
+            recipient_email=normalized_email,
+            workspace_name=workspace.name,
+            role=requested_role,
+            invite_token=invite.token,
+            expires_at=invite.expires_at,
+            inviter_name=inviter_name,
+        )
+    except EmailConfigurationError as exc:
+        _delete_invitation_record(db, invite)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except EmailDeliveryError as exc:
+        _delete_invitation_record(db, invite)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send invite email. Please try again.",
+        ) from exc
+
+    return _serialize_invitation(invite)
+
+
+@workspaces_router.post(
+    "/{workspace_id}/invitations/{invitation_id}/resend",
+    response_model=schemas.WorkspaceInvitationResponse,
+)
+def resend_workspace_invitation(
+    workspace_id: UUID,
+    invitation_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, workspace_id, user_id, required_role="admin")
+    invite = (
+        _pending_invites_query(db, workspace_id)
+        .filter(models.WorkspaceInvitation.id == invitation_id)
+        .first()
+    )
+    if not invite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+
+    workspace = db.query(models.Workspace).filter(models.Workspace.id == workspace_id).first()
+    if not workspace:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+    inviter = db.query(models.User).filter(models.User.id == user_id).first()
+    inviter_name = None
+    if inviter:
+        inviter_name = inviter.display_name or inviter.email
+
+    invite.expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_TTL_DAYS)
+    invite.invited_by = user_id
+    db.add(invite)
+    db.flush()
+
+    try:
+        send_workspace_invite_email(
+            recipient_email=invite.email,
+            workspace_name=workspace.name,
+            role=invite.role,
+            invite_token=invite.token,
+            expires_at=invite.expires_at,
+            inviter_name=inviter_name,
+        )
+    except EmailConfigurationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except EmailDeliveryError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send invite email. Please try again.",
+        ) from exc
+
+    db.commit()
+    db.refresh(invite)
+    return _serialize_invitation(invite)
+
+
+@workspaces_router.get("/invitations/{token}", response_model=schemas.WorkspaceInvitationResponse)
+def get_workspace_invitation_by_token(token: str, db: Session = Depends(get_db)):
+    invite = (
+        db.query(models.WorkspaceInvitation)
+        .options(joinedload(models.WorkspaceInvitation.workspace))
+        .filter(models.WorkspaceInvitation.token == token)
+        .first()
+    )
+    if not invite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+    if invite.cancelled_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation was cancelled")
+    if invite.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation expired")
     return _serialize_invitation(invite)
 
 

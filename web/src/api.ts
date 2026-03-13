@@ -198,6 +198,140 @@ export type KnowledgeBaseEntryPayload = {
   tags?: string[];
 };
 
+export type UsageAlert = {
+  id: string;
+  message: string;
+  tone: "warning" | "critical";
+};
+
+export type UsageWindowId = "daily" | "weekly" | "monthly";
+
+export type UsageDashboardResponse = {
+  summary: {
+    plan_tier: string;
+    weekly_limit: number;
+    weekly_used: number;
+    credits_remaining: number;
+    last_reset: string | null;
+    window_label: string;
+    reset_label: string;
+    recommendation_copy: string;
+    personal_usage_percent: number;
+  };
+  windows: Array<{
+    id: UsageWindowId;
+    label: string;
+    used: number;
+    total: number;
+    reset: string;
+    coverage: string;
+  }>;
+  motivation_messages: Array<{
+    id: string;
+    title: string;
+    subtitle: string;
+    tone: "positive" | "critical";
+  }>;
+  breakdown: Array<{
+    feature: string;
+    requests: number;
+    credits: number;
+    last_used: string;
+    type: string;
+  }>;
+  history: Array<{
+    id: string;
+    period: string;
+    usage: string;
+    change: string;
+    change_tone: string;
+    insight: string;
+  }>;
+  workspace_members: Array<{
+    name: string;
+    percent: number;
+    avatar_color: string;
+  }>;
+  personal_highlights: Array<{ label: string; value: string }>;
+  plan_comparisons: Array<{
+    id: string;
+    name: string;
+    limit: string;
+    credits: string;
+    price: string;
+    highlight: boolean;
+  }>;
+  credit_packages: Array<{
+    id: string;
+    label: string;
+    credits: number;
+    price: number;
+    bonus?: string | null;
+  }>;
+  alert_cards: UsageAlert[];
+  toast_alerts: UsageAlert[];
+  purchase_message?: string | null;
+};
+
+export async function getUsageDashboard(
+  workspaceId: string,
+  userId?: string | null
+): Promise<UsageDashboardResponse> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const url = workspaceUrl(`${API_BASE}/usage/dashboard`, workspaceId, userId);
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to load usage dashboard.");
+  }
+  return (await res.json()) as UsageDashboardResponse;
+}
+
+export async function addUsageCredits(
+  workspaceId: string,
+  packageId: string,
+  userId?: string | null
+): Promise<UsageDashboardResponse> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const body: Record<string, unknown> = {
+    package_id: packageId,
+    workspace_id: workspaceId,
+    user_id: userId || resolveUserId(userId),
+  };
+  const res = await fetch(`${API_BASE}/usage/credits`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to add credits.");
+  }
+  return (await res.json()) as UsageDashboardResponse;
+}
+
+export type BillingPlan = "trial" | "pro" | "team";
+export type BillingStatus = "inactive" | "pending" | "active" | "past_due" | "canceled";
+
+export type WorkspaceBillingStatus = {
+  workspace_id: string;
+  plan: BillingPlan;
+  status: BillingStatus;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  cancel_at?: string | null;
+  canceled_at?: string | null;
+};
+
+export type BillingCheckoutResponse = {
+  workspace_id: string;
+  plan: BillingPlan;
+  checkout_url: string;
+  session_id: string;
+};
+
 export type TaskStatus = "todo" | "in_progress" | "done";
 export type TaskPriority = "low" | "medium" | "high" | "critical";
 
@@ -205,11 +339,13 @@ export type TaskRecord = {
   id: string;
   workspace_id: string;
   project_id?: string | null;
+  task_board_id?: string | null;
   epic_id?: string | null;
   title: string;
   description?: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  position?: number | null;
   assignee_id?: string | null;
   due_date?: string | null;
   roadmap_id?: string | null;
@@ -223,11 +359,13 @@ export type TaskRecord = {
 
 export type TaskPayload = {
   project_id?: string | null;
+  task_board_id?: string | null;
   epic_id?: string | null;
   title: string;
   description?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
+  position?: number | null;
   assignee_id?: string | null;
   due_date?: string | null;
   roadmap_id?: string | null;
@@ -251,9 +389,32 @@ export type TaskGenerationItem = {
   status: TaskStatus;
 };
 
+export type TaskBoardRecord = {
+  id: string;
+  workspace_id: string;
+  project_id?: string | null;
+  title: string;
+  description?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  task_count: number;
+};
+
+export type TaskBoardDetail = {
+  board: TaskBoardRecord;
+  columns: Record<TaskStatus, TaskRecord[]>;
+};
+
+export type TaskBoardGenerateResponse = {
+  assistant_message: string;
+  tasks: TaskGenerationItem[];
+  context_entries?: KnowledgeBaseContextItem[] | null;
+};
+
 export type PRDRecord = {
   id: string;
-  project_id: string;
+  project_id?: string | null;
   feature_name?: string | null;
   description?: string | null;
   goals?: string | null;
@@ -266,6 +427,7 @@ export type PRDRecord = {
   created_by?: string | null;
   context_entries?: KnowledgeBaseContextItem[] | null;
   verification?: VerificationDetails | null;
+  assistant_message?: string | null;
 };
 
 export type PRDVersionSummary = {
@@ -382,6 +544,14 @@ export type RoadmapPhasePayload = {
   status?: string | null;
 };
 
+export type RoadmapSummary = {
+  id: string;
+  project_id?: string | null;
+  workspace_id: string;
+  title: string;
+  updated_at: string;
+};
+
 export type RoadmapMilestonePayload = {
   title: string;
   description?: string | null;
@@ -423,6 +593,32 @@ export type RoadmapRetrospective = {
   lessons: string[];
   generated_at: string;
 };
+
+const RAW_ROADMAP_TIMEOUT_MS = Number(import.meta.env.VITE_ROADMAP_TIMEOUT_MS ?? 0);
+const ROADMAP_TIMEOUT_MS = Number.isFinite(RAW_ROADMAP_TIMEOUT_MS) && RAW_ROADMAP_TIMEOUT_MS > 0
+  ? RAW_ROADMAP_TIMEOUT_MS
+  : 0;
+
+async function fetchWithOptionalRoadmapTimeout(url: string, init: RequestInit): Promise<Response> {
+  if (!ROADMAP_TIMEOUT_MS) {
+    return fetch(url, init);
+  }
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), ROADMAP_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Roadmap request timed out. Please retry.");
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
 
 export type RoadmapAIUpdateItem = {
   milestone_id: string;
@@ -630,6 +826,7 @@ export type ProjectMember = {
 export type WorkspaceInvitation = {
   id: string;
   workspace_id: string;
+  workspace_name?: string | null;
   email: string;
   role: WorkspaceRole;
   token: string;
@@ -856,6 +1053,9 @@ export type WorkspaceAgent = {
   max_tokens?: number | null;
   modules: string[];
   tools: Record<string, any>;
+  capabilities: Array<Record<string, any>>;
+  context_config: Record<string, any>;
+  context_tag?: string | null;
   mcp_connection_ids: string[];
   avatar_url?: string | null;
   accent_color?: string | null;
@@ -865,6 +1065,8 @@ export type WorkspaceAgent = {
   cloned_from_id?: string | null;
   created_at: string;
   updated_at: string;
+  is_default?: boolean;
+  default_type?: string | null;
 };
 
 export type WorkspaceAgentPayload = {
@@ -878,6 +1080,8 @@ export type WorkspaceAgentPayload = {
   max_tokens?: number | null;
   modules?: string[];
   tools?: Record<string, any>;
+  capabilities?: Array<Record<string, any>>;
+  context_config?: Record<string, any>;
   mcp_connection_ids?: string[];
   avatar_url?: string | null;
   accent_color?: string | null;
@@ -885,6 +1089,14 @@ export type WorkspaceAgentPayload = {
 };
 
 export type WorkspaceAgentUpdatePayload = Partial<WorkspaceAgentPayload>;
+
+export type AgentContextLinkPayload = {
+  workspace_id: string;
+  user_id: string;
+  project_ids?: string[];
+  prd_ids?: string[];
+  roadmap_ids?: string[];
+};
 
 export type MCPConnection = {
   id: string;
@@ -1060,13 +1272,19 @@ export async function createProject(data: {
   north_star_metric?: string | null;
   target_personas?: string[] | null;
   workspace_id: string;
+  website_url?: string | null;
+  attributes?: Record<string, Record<string, unknown>>;
+  color?: string | null;
 }) {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects`, data.workspace_id), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error("Failed to create project");
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to create project");
+  }
   return res.json();
 }
 
@@ -1079,6 +1297,9 @@ export async function updateProject(
     north_star_metric?: string | null;
     target_personas?: string[];
     workspace_id: string;
+    website_url?: string | null;
+    attributes?: Record<string, Record<string, unknown>>;
+    color?: string | null;
   }
 ) {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${id}`, data.workspace_id), {
@@ -1098,10 +1319,137 @@ export async function deleteProject(id: string, workspaceId: string) {
   return res.json();
 }
 
+export type ProjectBuilderMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type ProjectBuilderResponse = {
+  assistant_message: string;
+  attributes: Record<string, Record<string, unknown>>;
+  suggested_description?: string | null;
+};
+
+export type ProjectBriefResponse = {
+  summary: string;
+  bullets: string[];
+};
+
+export async function projectBuilderChat(
+  workspaceId: string,
+  payload: {
+    messages: ProjectBuilderMessage[];
+    attributes?: Record<string, Record<string, unknown>>;
+  },
+  options?: {
+    signal?: AbortSignal;
+  }
+): Promise<ProjectBuilderResponse> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/builder/chat`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: options?.signal,
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to chat with project builder");
+  }
+  return res.json();
+}
+
+export async function projectBuilderBrief(
+  workspaceId: string,
+  payload: {
+    attributes?: Record<string, Record<string, unknown>>;
+    context_entries?: { title?: string | null; content?: string | null; source_url?: string | null }[];
+  },
+  options?: {
+    signal?: AbortSignal;
+  }
+): Promise<ProjectBriefResponse> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/builder/brief`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: options?.signal,
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to generate project brief");
+  }
+  return res.json();
+}
+
 // ---------------- Roadmap ----------------
 export async function fetchRoadmap(projectId: string, workspaceId: string) {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch roadmap");
+  return res.json();
+}
+
+export async function fetchWorkspaceRoadmap(workspaceId: string) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/roadmaps/workspace`, workspaceId));
+  if (!res.ok) throw new Error("Failed to fetch roadmap");
+  return res.json();
+}
+
+export async function listWorkspaceRoadmaps(workspaceId: string, userId?: string | null): Promise<RoadmapSummary[]> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/roadmaps/workspace/list`, workspaceId, userId)
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load roadmaps");
+  }
+  return res.json();
+}
+
+export async function deleteRoadmap(projectId: string, workspaceId: string) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId), {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete roadmap");
+}
+
+export async function deleteWorkspaceRoadmap(workspaceId: string) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/roadmaps/workspace`, workspaceId), {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete roadmap");
+}
+
+export async function saveRoadmap(
+  projectId: string,
+  workspaceId: string,
+  content: string
+): Promise<{ id: string; updated_at: string }> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to save roadmap");
+  }
+  return res.json();
+}
+
+export async function saveWorkspaceRoadmap(
+  workspaceId: string,
+  content: string
+): Promise<{ id: string; updated_at: string }> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/roadmaps/workspace`, workspaceId), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to save roadmap");
+  }
   return res.json();
 }
 
@@ -1293,19 +1641,48 @@ export async function generateRoadmapChat(
   conversation: ChatMessage[],
   userId?: string | null,
   workspaceId?: string,
-  templateId?: string | null
+  templateId?: string | null,
+  contextTag?: string | null
 ): Promise<RoadmapGenerateResponse> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/roadmap/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      conversation_history: conversation,
-      user_id: userId ?? null,
-      workspace_id: workspaceId ?? null,
-      template_id: templateId ?? null,
-    }),
-  });
+  const res = await fetchWithOptionalRoadmapTimeout(`${API_BASE}/projects/${projectId}/roadmap/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        conversation_history: conversation,
+        user_id: userId ?? null,
+        workspace_id: workspaceId ?? null,
+        template_id: templateId ?? null,
+        context_tag: contextTag ?? null,
+      }),
+    });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to generate roadmap");
+  }
+  return res.json();
+}
+
+export async function generateWorkspaceRoadmapChat(
+  prompt: string,
+  conversation: ChatMessage[],
+  userId?: string | null,
+  workspaceId?: string,
+  templateId?: string | null,
+  contextTag?: string | null
+): Promise<RoadmapGenerateResponse> {
+  const res = await fetchWithOptionalRoadmapTimeout(`${API_BASE}/roadmaps/workspace/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        conversation_history: conversation,
+        user_id: userId ?? null,
+        workspace_id: workspaceId ?? null,
+        template_id: templateId ?? null,
+        context_tag: contextTag ?? null,
+      }),
+    });
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || "Failed to generate roadmap");
@@ -1320,19 +1697,77 @@ export async function sendRoadmapChatTurn(payload: {
   chat_id?: string | null;
   user_id?: string | null;
   template_id?: string | null;
+  context_tag?: string | null;
 }): Promise<RoadmapChatTurnResponse> {
-  const res = await fetch(`${API_BASE}/chat/roadmap`, {
+  const res = await fetchWithOptionalRoadmapTimeout(`${API_BASE}/chat/roadmap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        user_id: payload.user_id ?? resolveUserId(),
+        template_id: payload.template_id ?? null,
+      }),
+    });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to process roadmap chat");
+  }
+  return res.json();
+}
+
+export async function sendWorkspaceRoadmapChatTurn(payload: {
+  workspace_id: string;
+  prompt: string;
+  chat_id?: string | null;
+  user_id?: string | null;
+  template_id?: string | null;
+  context_tag?: string | null;
+}): Promise<RoadmapChatTurnResponse> {
+  const res = await fetchWithOptionalRoadmapTimeout(`${API_BASE}/chat/roadmap/workspace`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        user_id: payload.user_id ?? resolveUserId(),
+        template_id: payload.template_id ?? null,
+      }),
+    });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to process roadmap chat");
+  }
+  return res.json();
+}
+
+export async function listProjectChats(workspaceId: string, projectId: string, userId?: string | null) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/chat/roadmap/project/${projectId}`, workspaceId, userId));
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load project chats");
+  }
+  return res.json() as Promise<RoadmapChatSession[]>;
+}
+
+export async function linkRoadmapContext(payload: {
+  workspace_id: string;
+  user_id?: string | null;
+  context_tag: string;
+  project_ids?: string[];
+  prd_ids?: string[];
+}): Promise<KnowledgeBaseEntry[]> {
+  const res = await fetch(`${API_BASE}/roadmaps/context/link`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...payload,
-      user_id: payload.user_id ?? resolveUserId(),
-      template_id: payload.template_id ?? null,
+      user_id: resolveUserId(payload.user_id),
+      project_ids: payload.project_ids ?? [],
+      prd_ids: payload.prd_ids ?? [],
     }),
   });
   if (!res.ok) {
     const msg = await res.text();
-    throw new Error(msg || "Failed to process roadmap chat");
+    throw new Error(msg || "Failed to link context");
   }
   return res.json();
 }
@@ -1508,6 +1943,159 @@ export async function generateTasksFromAI(payload: {
   }
   return res.json();
 }
+
+export async function listTaskBoards(
+  workspaceId: string,
+  userId: string,
+  projectId?: string
+): Promise<TaskBoardRecord[]> {
+  const params = buildWorkspaceQuery(workspaceId, userId, projectId ? { project_id: projectId } : undefined);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/task-boards?${params}`);
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load task boards");
+  }
+  return res.json();
+}
+
+export async function createTaskBoard(
+  workspaceId: string,
+  userId: string,
+  payload: { title: string; description?: string | null; project_id?: string | null }
+): Promise<TaskBoardRecord> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/task-boards?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to create task board");
+  }
+  return res.json();
+}
+
+export async function getTaskBoard(
+  boardId: string,
+  workspaceId: string,
+  userId: string
+): Promise<TaskBoardDetail> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/task-boards/${boardId}?${params}`);
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to load task board");
+  }
+  return res.json();
+}
+
+export async function updateTaskBoard(
+  boardId: string,
+  workspaceId: string,
+  userId: string,
+  payload: { title?: string; description?: string | null; project_id?: string | null }
+): Promise<TaskBoardRecord> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/task-boards/${boardId}?${params}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to update task board");
+  }
+  return res.json();
+}
+
+export async function deleteTaskBoard(boardId: string, workspaceId: string, userId: string) {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/task-boards/${boardId}?${params}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to delete task board");
+  }
+}
+
+export async function bulkCreateTaskBoardTasks(
+  boardId: string,
+  workspaceId: string,
+  userId: string,
+  payload: {
+    project_id?: string | null;
+    tasks: Array<{
+      title: string;
+      description?: string | null;
+      status?: TaskStatus;
+      priority?: TaskPriority;
+      position?: number | null;
+      assignee_id?: string | null;
+      due_date?: string | null;
+      epic_id?: string | null;
+      roadmap_id?: string | null;
+      kb_entry_id?: string | null;
+      prd_id?: string | null;
+    }>;
+  }
+): Promise<{ tasks: TaskRecord[] }> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/task-boards/${boardId}/tasks/bulk?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to save generated tasks");
+  }
+  return res.json();
+}
+
+export async function reorderTaskBoardTasks(
+  boardId: string,
+  workspaceId: string,
+  userId: string,
+  updates: Array<{ task_id: string; status: TaskStatus; position: number }>
+): Promise<TaskBoardDetail> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/task-boards/${boardId}/tasks/reorder?${params}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ updates }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to reorder tasks");
+  }
+  return res.json();
+}
+
+export async function generateTaskBoardDraft(
+  boardId: string,
+  workspaceId: string,
+  payload: {
+    user_id: string;
+    prompt: string;
+    project_id?: string | null;
+    prd_id?: string | null;
+    roadmap_id?: string | null;
+  }
+): Promise<TaskBoardGenerateResponse> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/task-boards/${boardId}/generate`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to generate task board draft");
+  }
+  return res.json();
+}
+
 export async function updateRoadmap(projectId: string, workspaceId: string, content: string) {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/roadmap`, workspaceId), {
     method: "PUT",
@@ -1536,6 +2124,95 @@ export async function createPrd(
   return res.json();
 }
 
+export async function createWorkspacePrd(
+  workspaceId: string,
+  body: { feature_name: string; prompt: string; template_id?: string | null }
+): Promise<PRDRecord> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to create PRD");
+  return res.json();
+}
+
+export type PRDListItem = {
+  id: string;
+  project_id?: string | null;
+  project_title?: string | null;
+  feature_name?: string | null;
+  description?: string | null;
+  status: "draft" | "saved";
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function getWorkspacePrds(
+  workspaceId: string,
+  status?: "draft" | "saved",
+  query?: string
+): Promise<PRDListItem[]> {
+  const extra: Record<string, string | undefined> = {};
+  if (status) extra.status = status;
+  if (query) extra.query = query;
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds`, workspaceId, undefined, extra));
+  if (!res.ok) throw new Error("Failed to fetch PRDs");
+  return res.json();
+}
+
+export async function getWorkspacePrd(prdId: string, workspaceId: string): Promise<PRDRecord> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds/${prdId}`, workspaceId));
+  if (!res.ok) throw new Error("Failed to fetch PRD");
+  return res.json();
+}
+
+export type PRDChatMessage = {
+  id: string;
+  prd_id: string;
+  project_id?: string | null;
+  workspace_id: string;
+  role: "assistant" | "user";
+  content: string;
+  created_at: string;
+};
+
+export async function getWorkspacePrdMessages(prdId: string, workspaceId: string): Promise<PRDChatMessage[]> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds/${prdId}/messages`, workspaceId));
+  if (!res.ok) throw new Error("Failed to fetch PRD messages");
+  return res.json();
+}
+
+export async function createPrdNote(
+  workspaceId: string,
+  body: { title?: string | null; content: string; tags?: string[]; prd_id?: string | null },
+  prdId?: string | null
+): Promise<KnowledgeBaseEntry> {
+  const path = prdId ? `${API_BASE}/prds/${prdId}/notes` : `${API_BASE}/prds/notes`;
+  const res = await fetch(workspaceUrl(path, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to add note");
+  return res.json();
+}
+
+export async function attachPrdToProject(
+  workspaceId: string,
+  prdId: string,
+  projectId: string
+): Promise<PRDRecord> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds/${prdId}/attach-project`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  if (!res.ok) throw new Error("Failed to attach PRD to project");
+  return res.json();
+}
+
 export async function getPrds(projectId: string, workspaceId: string): Promise<PRDRecord[]> {
   const res = await fetch(workspaceUrl(`${API_BASE}/projects/${projectId}/prds`, workspaceId));
   if (!res.ok) throw new Error("Failed to fetch PRDs");
@@ -1552,14 +2229,30 @@ export async function refinePrd(
   projectId: string,
   prdId: string,
   workspaceId: string,
-  instructions: string
+  instructions: string,
+  templateId?: string | null
 ): Promise<PRDRecord> {
   const res = await fetch(
     workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/refine`, workspaceId),
     {
       method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ instructions })
+    body: JSON.stringify({ instructions, template_id: templateId ?? null })
+  });
+  if (!res.ok) throw new Error("Failed to refine PRD");
+  return res.json();
+}
+
+export async function refineWorkspacePrd(
+  prdId: string,
+  workspaceId: string,
+  instructions: string,
+  templateId?: string | null
+): Promise<PRDRecord> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds/${prdId}/refine`, workspaceId), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instructions, template_id: templateId ?? null }),
   });
   if (!res.ok) throw new Error("Failed to refine PRD");
   return res.json();
@@ -1579,6 +2272,23 @@ export async function savePrdVersion(
       body: JSON.stringify(payload),
     }
   );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to save PRD version");
+  }
+  return res.json();
+}
+
+export async function saveWorkspacePrdVersion(
+  prdId: string,
+  workspaceId: string,
+  payload: { content: string; feature_name?: string | null; description?: string | null }
+): Promise<PRDRecord> {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds/${prdId}/save`, workspaceId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || "Failed to save PRD version");
@@ -1824,10 +2534,29 @@ export async function deletePrd(projectId: string, prdId: string, workspaceId: s
   if (!res.ok) throw new Error("Failed to delete PRD");
 }
 
+export async function deleteWorkspacePrd(prdId: string, workspaceId: string) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds/${prdId}`, workspaceId), {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete PRD");
+}
+
 export async function exportPrd(projectId: string, prdId: string, workspaceId: string) {
   const res = await fetch(
     workspaceUrl(`${API_BASE}/projects/${projectId}/prds/${prdId}/export`, workspaceId)
   );
+  if (!res.ok) throw new Error("Failed to export PRD");
+
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `PRD_${prdId}.docx`;
+  a.click();
+}
+
+export async function exportWorkspacePrd(prdId: string, workspaceId: string) {
+  const res = await fetch(workspaceUrl(`${API_BASE}/prds/${prdId}/export`, workspaceId));
   if (!res.ok) throw new Error("Failed to export PRD");
 
   const blob = await res.blob();
@@ -2306,6 +3035,37 @@ export async function updateWorkspaceAgent(
   return res.json();
 }
 
+export async function deleteWorkspaceAgent(workspaceId: string, agentId: string): Promise<void> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}`, workspaceId),
+    { method: "DELETE" }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to delete agent");
+  }
+}
+
+export async function linkAgentContext(
+  workspaceId: string,
+  agentId: string,
+  payload: AgentContextLinkPayload
+): Promise<KnowledgeBaseEntry[]> {
+  const res = await fetch(
+    workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}/context/link`, workspaceId),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to link agent context");
+  }
+  return res.json();
+}
+
 export async function shareWorkspaceAgent(workspaceId: string, agentId: string): Promise<WorkspaceAgent> {
   const res = await fetch(
     workspaceUrl(`${API_BASE}/workspaces/${workspaceId}/agents/${agentId}/share`, workspaceId),
@@ -2536,8 +3296,16 @@ export type WorkspaceSummary = {
 };
 
 export type WorkspaceOnboardingStep = {
-  id: "complete_profile" | "create_project" | "add_team_members" | "generate_prd";
+  id: "create_project" | "set_goals" | "generate_roadmap" | "write_prd" | "build_agent";
   completed: boolean;
+  completed_at?: string | null;
+};
+
+export type WorkspaceOnboardingProfile = {
+  full_name?: string | null;
+  email?: string | null;
+  company?: string | null;
+  team_size?: string | null;
 };
 
 export type WorkspaceOnboardingStatus = {
@@ -2545,10 +3313,13 @@ export type WorkspaceOnboardingStatus = {
   workspace_name: string;
   user_name?: string | null;
   welcome_acknowledged: boolean;
+  onboarding_profile?: WorkspaceOnboardingProfile | null;
   steps: WorkspaceOnboardingStep[];
   completed_steps: number;
   total_steps: number;
   next_step_id?: WorkspaceOnboardingStep["id"] | null;
+  partner_name?: string | null;
+  partner_focus?: string[];
 };
 
 export async function getUserWorkspaces(userId: string, signal?: AbortSignal): Promise<WorkspaceSummary[]> {
@@ -2588,7 +3359,13 @@ export async function getWorkspaceOnboardingStatus(
 
 export async function updateWorkspaceOnboardingStatus(
   workspaceId: string,
-  payload: { welcome_acknowledged?: boolean },
+  payload: {
+    welcome_acknowledged?: boolean;
+    partner_name?: string | null;
+    partner_focus?: string[];
+    complete_step_id?: WorkspaceOnboardingStep["id"];
+    onboarding_profile?: WorkspaceOnboardingProfile | null;
+  },
   userId?: string | null
 ): Promise<WorkspaceOnboardingStatus> {
   const params = new URLSearchParams();
@@ -2601,6 +3378,102 @@ export async function updateWorkspaceOnboardingStatus(
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to update onboarding status");
+  }
+  return res.json();
+}
+
+export async function getWorkspaceBillingStatus(
+  workspaceId: string,
+  userId?: string | null
+): Promise<WorkspaceBillingStatus> {
+  if (!workspaceId) {
+    throw new Error("Workspace context missing");
+  }
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId(userId));
+  const res = await fetch(`${API_BASE}/billing/workspaces/${workspaceId}?${params.toString()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to load billing status");
+  }
+  return res.json();
+}
+
+export async function createBillingCheckoutSession(options: {
+  workspaceId: string;
+  plan: BillingPlan;
+  successUrl?: string;
+  cancelUrl?: string;
+  userId?: string | null;
+}): Promise<BillingCheckoutResponse> {
+  if (!options.workspaceId) {
+    throw new Error("Workspace context missing");
+  }
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId(options.userId));
+  const res = await fetch(`${API_BASE}/billing/checkout?${params.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: options.workspaceId,
+      plan: options.plan,
+      success_url: options.successUrl,
+      cancel_url: options.cancelUrl,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to start checkout");
+  }
+  return res.json();
+}
+
+export async function confirmBillingCheckout(options: {
+  workspaceId: string;
+  sessionId: string;
+  userId?: string | null;
+}): Promise<WorkspaceBillingStatus> {
+  if (!options.workspaceId || !options.sessionId) {
+    throw new Error("Checkout session missing. Please try again.");
+  }
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId(options.userId));
+  const res = await fetch(`${API_BASE}/billing/confirm?${params.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: options.workspaceId,
+      session_id: options.sessionId,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to validate checkout session");
+  }
+  return res.json();
+}
+
+export async function createBillingPortalSession(options: {
+  workspaceId: string;
+  returnUrl?: string;
+  userId?: string | null;
+}): Promise<{ portal_url: string }> {
+  if (!options.workspaceId) {
+    throw new Error("Workspace context missing");
+  }
+  const params = new URLSearchParams();
+  params.set("user_id", resolveUserId(options.userId));
+  const res = await fetch(`${API_BASE}/billing/portal?${params.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: options.workspaceId,
+      return_url: options.returnUrl,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to open billing portal");
   }
   return res.json();
 }
@@ -2646,6 +3519,25 @@ export async function getWorkspaceInvitations(
   const params = buildWorkspaceQuery(workspaceId, userId);
   const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invitations?${params}`);
   if (!res.ok) throw new Error("Failed to load invitations");
+  return res.json();
+}
+
+export async function resendWorkspaceInvitation(
+  workspaceId: string,
+  invitationId: string,
+  userId?: string | null
+): Promise<WorkspaceInvitation> {
+  const params = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(
+    `${API_BASE}/workspaces/${workspaceId}/invitations/${invitationId}/resend?${params}`,
+    {
+      method: "POST",
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to resend invitation");
+  }
   return res.json();
 }
 
@@ -2925,6 +3817,15 @@ export async function inviteWorkspaceMember(
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to send invitation");
+  }
+  return res.json();
+}
+
+export async function getWorkspaceInvitationByToken(token: string): Promise<WorkspaceInvitation> {
+  const res = await fetch(`${API_BASE}/workspaces/invitations/${token}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Invitation not found or expired");
   }
   return res.json();
 }

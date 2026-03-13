@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, AnyUrl
+from pydantic import BaseModel, Field, EmailStr, AnyUrl, ConfigDict
 from typing import Optional, Literal, Any
 from datetime import datetime
 from uuid import UUID
@@ -6,6 +6,8 @@ from uuid import UUID
 WorkspaceRoleLiteral = Literal["admin", "editor", "viewer"]
 ProjectRoleLiteral = Literal["owner", "contributor", "viewer"]
 TaskStatusLiteral = Literal["todo", "in_progress", "done"]
+BillingPlanLiteral = Literal["trial", "pro", "team"]
+BillingStatusLiteral = Literal["inactive", "pending", "active", "past_due", "canceled"]
 
 class VerificationDetails(BaseModel):
     status: Literal["passed", "failed", "skipped", "declined"]
@@ -22,17 +24,17 @@ class PRDCreate(BaseModel):
     prompt: str           # Optional user prompt
     template_id: UUID | None = None
 
-    class Config:
-        extra = "ignore"  # Ignore extra/missing fields so `{}` works
+    model_config = ConfigDict(extra="ignore")  # Ignore extra/missing fields so `{}` works
 
 
 class PRDRefine(BaseModel):
     instructions: str  # user feedback for refinement
+    template_id: UUID | None = None
 
 
 class PRDResponse(BaseModel):
     id: UUID
-    project_id: UUID   # ✅ fix here
+    project_id: UUID | None
     feature_name: str | None = None
     description: str | None = None
     goals: str | None = None
@@ -45,15 +47,38 @@ class PRDResponse(BaseModel):
     created_by: UUID | None = None
     context_entries: list["KnowledgeBaseContextItem"] | None = None
     verification: VerificationDetails | None = None
+    assistant_message: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PRDProjectAttachRequest(BaseModel):
+    project_id: UUID
 
 
 class PRDSaveRequest(BaseModel):
     content: str
     feature_name: str | None = None
     description: str | None = None
+
+
+class PRDNoteCreate(BaseModel):
+    prd_id: UUID | None = None
+    title: str | None = None
+    content: str
+    tags: list[str] | None = None
+
+
+class PRDListItem(BaseModel):
+    id: UUID
+    project_id: UUID | None = None
+    project_title: str | None = None
+    feature_name: str | None = None
+    description: str | None = None
+    status: Literal["draft", "saved"]
+    message_count: int = 0
+    created_at: datetime
+    updated_at: datetime
 
 
 class PRDVersionSummary(BaseModel):
@@ -102,6 +127,19 @@ class PRDDecisionNoteResponse(BaseModel):
     created_at: datetime
 
 
+class PRDChatMessageResponse(BaseModel):
+    id: UUID
+    prd_id: UUID
+    project_id: UUID | None = None
+    workspace_id: UUID
+    role: str
+    content: str
+    created_by: UUID | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class PRDQARequest(BaseModel):
     question: str
     prd_id: UUID | None = None
@@ -130,8 +168,7 @@ class DocumentResponse(BaseModel):
     has_embedding: bool
     workspace_id: UUID | None = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------------------------------------------------------
@@ -149,6 +186,7 @@ class RoadmapGenerateRequest(BaseModel):
     user_id: UUID | None = None
     workspace_id: UUID
     template_id: UUID | None = None
+    context_tag: str | None = None
 
 
 class RoadmapGenerateResponse(BaseModel):
@@ -169,6 +207,32 @@ class RoadmapChatTurnRequest(BaseModel):
     prompt: str
     chat_id: UUID | None = None
     template_id: UUID | None = None
+    context_tag: str | None = None
+
+
+class RoadmapWorkspaceChatTurnRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    prompt: str
+    chat_id: UUID | None = None
+    template_id: UUID | None = None
+    context_tag: str | None = None
+
+
+class RoadmapSummary(BaseModel):
+    id: UUID
+    project_id: UUID | None = None
+    workspace_id: UUID
+    title: str
+    updated_at: datetime
+
+
+class RoadmapContextLinkRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    context_tag: str
+    project_ids: list[UUID] = Field(default_factory=list)
+    prd_ids: list[UUID] = Field(default_factory=list)
 
 
 class RoadmapChatRecord(BaseModel):
@@ -391,11 +455,13 @@ TaskPriorityLiteral = Literal["low", "medium", "high", "critical"]
 
 class TaskBase(BaseModel):
     project_id: UUID | None = None
+    task_board_id: UUID | None = None
     epic_id: UUID | None = None
     title: str
     description: str | None = None
     status: TaskStatusLiteral = "todo"
     priority: TaskPriorityLiteral = "medium"
+    position: int | None = None
     assignee_id: UUID | None = None
     due_date: datetime | None = None
     roadmap_id: UUID | None = None
@@ -409,11 +475,13 @@ class TaskCreate(TaskBase):
 
 class TaskUpdate(BaseModel):
     project_id: UUID | None = None
+    task_board_id: UUID | None = None
     epic_id: UUID | None = None
     title: str | None = None
     description: str | None = None
     status: TaskStatusLiteral | None = None
     priority: TaskPriorityLiteral | None = None
+    position: int | None = None
     assignee_id: UUID | None = None
     due_date: datetime | None = None
     roadmap_id: UUID | None = None
@@ -429,8 +497,7 @@ class TaskResponse(TaskBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskCommentCreate(BaseModel):
@@ -444,8 +511,7 @@ class TaskCommentResponse(BaseModel):
     content: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskGenerationItem(BaseModel):
@@ -470,6 +536,85 @@ class TaskGenerationResponse(BaseModel):
     context_entries: list["KnowledgeBaseContextItem"] | None = None
 
 
+class TaskBoardBase(BaseModel):
+    project_id: UUID | None = None
+    title: str
+    description: str | None = None
+
+
+class TaskBoardCreate(TaskBoardBase):
+    pass
+
+
+class TaskBoardUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    project_id: UUID | None = None
+
+
+class TaskBoardResponse(TaskBoardBase):
+    id: UUID
+    workspace_id: UUID
+    created_by: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    task_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TaskBoardDetailResponse(BaseModel):
+    board: TaskBoardResponse
+    columns: dict[TaskStatusLiteral, list[TaskResponse]]
+
+
+class TaskBoardBulkTaskCreate(BaseModel):
+    title: str
+    description: str | None = None
+    status: TaskStatusLiteral = "todo"
+    priority: TaskPriorityLiteral = "medium"
+    position: int | None = None
+    assignee_id: UUID | None = None
+    due_date: datetime | None = None
+    epic_id: UUID | None = None
+    roadmap_id: UUID | None = None
+    kb_entry_id: UUID | None = None
+    prd_id: UUID | None = None
+
+
+class TaskBoardBulkCreateRequest(BaseModel):
+    project_id: UUID | None = None
+    tasks: list[TaskBoardBulkTaskCreate] = Field(default_factory=list)
+
+
+class TaskBoardBulkCreateResponse(BaseModel):
+    tasks: list[TaskResponse]
+
+
+class TaskBoardTaskReorderItem(BaseModel):
+    task_id: UUID
+    status: TaskStatusLiteral
+    position: int
+
+
+class TaskBoardTaskReorderRequest(BaseModel):
+    updates: list[TaskBoardTaskReorderItem] = Field(default_factory=list)
+
+
+class TaskBoardGenerateRequest(BaseModel):
+    user_id: UUID
+    prompt: str
+    project_id: UUID | None = None
+    prd_id: UUID | None = None
+    roadmap_id: UUID | None = None
+
+
+class TaskBoardGenerateResponse(BaseModel):
+    assistant_message: str
+    tasks: list[TaskGenerationItem]
+    context_entries: list["KnowledgeBaseContextItem"] | None = None
+
+
 TemplateVisibilityLiteral = Literal["private", "shared", "system"]
 TemplateFormatLiteral = Literal["markdown", "json"]
 
@@ -484,8 +629,7 @@ class TemplateVersionResponse(BaseModel):
     created_by: UUID | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemplateResponse(BaseModel):
@@ -505,8 +649,7 @@ class TemplateResponse(BaseModel):
     updated_at: datetime
     latest_version: TemplateVersionResponse
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemplateDetailResponse(TemplateResponse):
@@ -551,7 +694,7 @@ class RoadmapUpdateRequest(BaseModel):
 
 class RoadmapContentResponse(BaseModel):
     content: str
-    updated_at: datetime
+    updated_at: datetime | None = None
 
 
 # ---------------------------------------------------------
@@ -582,8 +725,7 @@ class AgentResponse(AgentBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkspaceAgentBase(BaseModel):
@@ -597,6 +739,8 @@ class WorkspaceAgentBase(BaseModel):
     max_tokens: int | None = None
     modules: list[str] = Field(default_factory=list)
     tools: dict[str, Any] = Field(default_factory=dict)
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+    context_config: dict[str, Any] = Field(default_factory=dict)
     mcp_connection_ids: list[UUID] = Field(default_factory=list)
     avatar_url: str | None = None
     accent_color: str | None = None
@@ -618,6 +762,8 @@ class WorkspaceAgentUpdate(BaseModel):
     max_tokens: int | None = None
     modules: list[str] | None = None
     tools: dict[str, Any] | None = None
+    capabilities: list[dict[str, Any]] | None = None
+    context_config: dict[str, Any] | None = None
     mcp_connection_ids: list[UUID] | None = None
     avatar_url: str | None = None
     accent_color: str | None = None
@@ -632,9 +778,19 @@ class WorkspaceAgentResponse(WorkspaceAgentBase):
     updated_at: datetime
     shared_at: datetime | None = None
     cloned_from_id: UUID | None = None
+    context_tag: str | None = None
+    is_default: bool = False
+    default_type: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentContextLinkRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID
+    project_ids: list[UUID] = Field(default_factory=list)
+    prd_ids: list[UUID] = Field(default_factory=list)
+    roadmap_ids: list[UUID] = Field(default_factory=list)
 
 
 class WorkspaceAgentTemplate(WorkspaceAgentResponse):
@@ -674,8 +830,7 @@ class MCPConnectionResponse(MCPConnectionBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentRunRequest(BaseModel):
@@ -700,8 +855,7 @@ class AgentRunLog(BaseModel):
     status: Literal["completed", "error"]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProjectAgentAssignRequest(BaseModel):
@@ -752,9 +906,10 @@ class WorkspaceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     role: WorkspaceRoleLiteral | None = None
+    billing_plan: BillingPlanLiteral | None = None
+    billing_status: BillingStatusLiteral | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkspaceCreate(BaseModel):
@@ -786,6 +941,7 @@ class WorkspaceInviteRequest(BaseModel):
 class WorkspaceInvitationResponse(BaseModel):
     id: UUID
     workspace_id: UUID
+    workspace_name: str | None = None
     email: EmailStr
     role: WorkspaceRoleLiteral
     token: str
@@ -803,6 +959,14 @@ class WorkspaceInvitationAcceptRequest(BaseModel):
 class WorkspaceOnboardingStep(BaseModel):
     id: str
     completed: bool
+    completed_at: datetime | None = None
+
+
+class WorkspaceOnboardingProfile(BaseModel):
+    full_name: str | None = None
+    email: EmailStr | None = None
+    company: str | None = None
+    team_size: str | None = None
 
 
 class WorkspaceOnboardingStatus(BaseModel):
@@ -810,6 +974,9 @@ class WorkspaceOnboardingStatus(BaseModel):
     workspace_name: str
     user_name: str | None = None
     welcome_acknowledged: bool
+    onboarding_profile: WorkspaceOnboardingProfile | None = None
+    partner_name: str | None = None
+    partner_focus: list[str] = []
     steps: list[WorkspaceOnboardingStep]
     completed_steps: int
     total_steps: int
@@ -818,6 +985,48 @@ class WorkspaceOnboardingStatus(BaseModel):
 
 class WorkspaceOnboardingUpdate(BaseModel):
     welcome_acknowledged: bool | None = None
+    partner_name: str | None = None
+    partner_focus: list[str] | None = None
+    complete_step_id: str | None = None
+    onboarding_profile: WorkspaceOnboardingProfile | None = None
+
+
+class WorkspaceBillingStatus(BaseModel):
+    workspace_id: UUID
+    plan: BillingPlanLiteral
+    status: BillingStatusLiteral
+    stripe_customer_id: str | None = None
+    stripe_subscription_id: str | None = None
+    cancel_at: datetime | None = None
+    canceled_at: datetime | None = None
+
+
+class BillingCheckoutRequest(BaseModel):
+    workspace_id: UUID
+    plan: BillingPlanLiteral
+    success_url: AnyUrl | None = None
+    cancel_url: AnyUrl | None = None
+
+
+class BillingCheckoutResponse(BaseModel):
+    workspace_id: UUID
+    plan: BillingPlanLiteral
+    checkout_url: AnyUrl
+    session_id: str
+
+
+class BillingConfirmRequest(BaseModel):
+    workspace_id: UUID
+    session_id: str
+
+
+class BillingPortalRequest(BaseModel):
+    workspace_id: UUID
+    return_url: AnyUrl | None = None
+
+
+class BillingPortalResponse(BaseModel):
+    portal_url: AnyUrl
 
 
 # ---------------------------------------------------------
@@ -961,9 +1170,7 @@ class WorkspaceMemory(BaseModel):
     created_by: UUID | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-        allow_population_by_field_name = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     force_refresh: bool = False
 
 
@@ -1175,8 +1382,7 @@ class ProjectCommentResponse(ProjectCommentBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------------------------------------------------------
@@ -1238,8 +1444,7 @@ class PrototypeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PrototypeGenerateRequest(BaseModel):
@@ -1271,8 +1476,7 @@ class ProjectLinkResponse(ProjectLinkBase):
     workspace_id: UUID | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---------------------------------------------------------
@@ -1297,8 +1501,7 @@ class PrototypeSessionResponse(BaseModel):
     bundle_url: str | None = None
     messages: list[PrototypeAgentMessage]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PrototypeSessionCreateRequest(BaseModel):

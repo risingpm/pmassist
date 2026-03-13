@@ -33,6 +33,7 @@ def generate_roadmap(id: str, workspace_id: UUID, user_id: UUID, db: Session = D
     Project Description: {project.description}
     Goals: {project.goals}
     North Star Metric: {project.north_star_metric or 'Not specified'}
+    Website or Key URL: {project.website_url or 'Not provided'}
 
     Format output strictly as JSON:
     {{
@@ -45,6 +46,8 @@ def generate_roadmap(id: str, workspace_id: UUID, user_id: UUID, db: Session = D
         "Feature 4"
       ]
     }}
+
+    If a website URL is provided, incorporate product positioning insights from that page before drafting the roadmap.
     """
 
     # Call OpenAI

@@ -75,7 +75,7 @@ def verify_citations(
     if not normalized:
         return schemas.VerificationDetails(status="failed", message="Assistant response was empty.")
     if decline_phrase and normalized.lower() == decline_phrase.lower():
-        return schemas.VerificationDetails(status="declined", message="Assistant declined due to missing context.")
+        return schemas.VerificationDetails(status="skipped", message="Assistant is proceeding without verified context.")
     if not allowed_markers:
         return schemas.VerificationDetails(status="skipped", message="No knowledge context was supplied.")
     matches = CITATION_PATTERN.findall(normalized)
@@ -92,4 +92,3 @@ def verify_citations(
 
 def verify_from_items(texts: Sequence[str], items: Sequence[schemas.KnowledgeBaseContextItem]) -> schemas.VerificationDetails:
     return verify_citations(texts, allowed_markers_from_items(items))
-

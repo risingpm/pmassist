@@ -6,8 +6,14 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend import models
-from backend.workspaces import create_workspace_with_owner, get_project_in_workspace
+from backend import models, schemas
+from backend.workspaces import (
+    create_workspace_with_owner,
+    get_project_in_workspace,
+    get_workspace_invitation_by_token,
+    invite_workspace_member,
+    resend_workspace_invitation,
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -73,3 +79,65 @@ def test_get_project_in_workspace(db_session):
 
     with pytest.raises(HTTPException):
         get_project_in_workspace(db_session, project.id, uuid.uuid4())
+
+
+def test_resend_workspace_invitation(db_session, monkeypatch):
+    owner = models.User(email=f"resend_owner_{uuid.uuid4()}@example.com", password_hash="dummy")
+    db_session.add(owner)
+    db_session.commit()
+
+    workspace = create_workspace_with_owner(db_session, name="Email Space", owner_id=owner.id)
+
+    sent_payloads: list[dict[str, str]] = []
+
+    def fake_send(**kwargs):
+        sent_payloads.append(kwargs)
+
+    monkeypatch.setattr("backend.workspaces.send_workspace_invite_email", fake_send)
+
+    invite = invite_workspace_member(
+        workspace.id,
+        schemas.WorkspaceInviteRequest(email=f"pending_{uuid.uuid4()}@example.com", role="viewer"),
+        owner.id,
+        db_session,
+    )
+
+    assert len(sent_payloads) == 1
+
+    record = (
+        db_session.query(models.WorkspaceInvitation)
+        .filter(models.WorkspaceInvitation.id == invite.id)
+        .first()
+    )
+    assert record is not None
+    previous_expiration = record.expires_at
+
+    sent_payloads.clear()
+    response = resend_workspace_invitation(workspace.id, record.id, owner.id, db_session)
+
+    assert response.id == record.id
+    assert len(sent_payloads) == 1
+
+    db_session.refresh(record)
+    assert record.expires_at > previous_expiration
+    assert record.invited_by == owner.id
+
+
+def test_get_workspace_invitation_by_token(db_session):
+    owner = models.User(email=f"lookup_invite_{uuid.uuid4()}@example.com", password_hash="dummy")
+    db_session.add(owner)
+    db_session.commit()
+
+    workspace = create_workspace_with_owner(db_session, name="Invite Lookup", owner_id=owner.id)
+
+    invite = invite_workspace_member(
+        workspace.id,
+        schemas.WorkspaceInviteRequest(email=f"lookup_{uuid.uuid4()}@example.com", role="viewer"),
+        owner.id,
+        db_session,
+    )
+
+    result = get_workspace_invitation_by_token(invite.token, db_session)
+    assert result.workspace_id == workspace.id
+    assert result.workspace_name == workspace.name
+    assert result.email == invite.email

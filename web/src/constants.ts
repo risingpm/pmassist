@@ -8,6 +8,7 @@ export const DEFAULT_AGENT_NAME = "Infinity";
 export const DEMO_INITIALIZED_KEY = "pmassist:demo-initialized";
 export const DEMO_WORKSPACE_ID_KEY = "pmassist:demo-workspace-id";
 export const DEMO_PROJECT_ID_KEY = "pmassist:demo-project-id";
+export const SELECTED_PRD_TEMPLATE_KEY = "pmassist:selected-prd-template";
 export const ONBOARDING_COMPLETE_KEY = "pmassist:onboarding-complete";
 export const AI_COACH_OPEN_EVENT = "pmassist:open-ai-coach";
 export const WIDE_PAGE_CONTAINER =

@@ -17,6 +17,7 @@ interface WorkspaceMembersPanelProps {
   onInvite: (email: string, role: WorkspaceRole) => Promise<void>;
   onRoleChange: (memberId: string, role: WorkspaceRole) => Promise<void>;
   onRemoveMember: (memberId: string) => Promise<void>;
+  onResendInvitation: (invitationId: string) => Promise<void>;
 }
 
 const ROLE_OPTIONS: WorkspaceRole[] = ["admin", "editor", "viewer"];
@@ -45,8 +46,10 @@ export default function WorkspaceMembersPanel({
   onInvite,
   onRoleChange,
   onRemoveMember,
+  onResendInvitation,
 }: WorkspaceMembersPanelProps) {
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
 
   const sortedMembers = useMemo(() => {
     return [...members].sort((a, b) => {
@@ -163,20 +166,43 @@ export default function WorkspaceMembersPanel({
           <div className={`${SURFACE_MUTED} border-dashed p-4`}>
             <p className="text-sm font-semibold text-slate-700">Pending invitations</p>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
-              {invitations.map((invite) => (
-                <li key={invite.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                  <div>
-                    <p className="font-medium text-slate-900">{invite.email}</p>
-                    <p className="text-xs text-slate-500">
-                      Role: {invite.role.charAt(0).toUpperCase() + invite.role.slice(1)} ·
-                      Invited {new Date(invite.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <span className="text-xs text-slate-400">
-                    Expires {new Date(invite.expires_at).toLocaleDateString()}
-                  </span>
-                </li>
-              ))}
+              {invitations.map((invite) => {
+                const isResending = resendingInviteId === invite.id;
+                const roleLabel = invite.role.charAt(0).toUpperCase() + invite.role.slice(1);
+                return (
+                  <li
+                    key={invite.id}
+                    className="flex flex-col gap-3 rounded-xl bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-900">{invite.email}</p>
+                      <p className="text-xs text-slate-500">
+                        Role: {roleLabel} · Invited {new Date(invite.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 text-xs text-slate-500 sm:items-end">
+                      <span>Expires {new Date(invite.expires_at).toLocaleDateString()}</span>
+                      <button
+                        type="button"
+                        disabled={isResending}
+                        onClick={async () => {
+                          setResendingInviteId(invite.id);
+                          try {
+                            await onResendInvitation(invite.id);
+                          } catch (err) {
+                            console.error("Failed to resend workspace invitation", err);
+                          } finally {
+                            setResendingInviteId(null);
+                          }
+                        }}
+                        className="text-sm font-semibold text-blue-600 transition hover:text-blue-700 disabled:opacity-60"
+                      >
+                        {isResending ? "Resending..." : "Resend email"}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}

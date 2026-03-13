@@ -54,6 +54,18 @@ class Workspace(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     onboarding_acknowledged = Column(Boolean, nullable=False, server_default="false")
+    ai_partner_name = Column(String, nullable=True)
+    ai_partner_focus = Column(ARRAY(String), default=list)
+    onboarding_steps_state = Column(JSONB, nullable=False, server_default="[]")
+    onboarding_profile = Column(JSONB, nullable=False, server_default="{}")
+    billing_plan = Column(String, nullable=False, server_default="trial")
+    billing_status = Column(String, nullable=False, server_default="inactive")
+    stripe_customer_id = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    billing_cancel_at = Column(DateTime(timezone=True), nullable=True)
+    billing_canceled_at = Column(DateTime(timezone=True), nullable=True)
+    prd_agent_id = Column(UUID(as_uuid=True), ForeignKey("ai_agents.id", ondelete="SET NULL"), nullable=True)
+    roadmap_agent_id = Column(UUID(as_uuid=True), ForeignKey("ai_agents.id", ondelete="SET NULL"), nullable=True)
 
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
     owner = relationship("User", backref="owned_workspaces")
@@ -97,7 +109,41 @@ class Workspace(Base):
         back_populates="workspace",
         cascade="all, delete-orphan",
     )
-    ai_agents = relationship("AIAgent", back_populates="workspace", cascade="all, delete-orphan")
+    ai_agents = relationship(
+        "AIAgent",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        foreign_keys="AIAgent.workspace_id",
+    )
+
+
+class WorkspaceUsageStats(Base):
+    __tablename__ = "workspace_usage_stats"
+
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    daily_used = Column(Integer, nullable=False, server_default="0")
+    daily_limit = Column(Integer, nullable=False, server_default="0")
+    weekly_used = Column(Integer, nullable=False, server_default="0")
+    weekly_limit = Column(Integer, nullable=False, server_default="0")
+    monthly_used = Column(Integer, nullable=False, server_default="0")
+    monthly_limit = Column(Integer, nullable=False, server_default="0")
+    last_reset_at = Column(DateTime(timezone=True), nullable=True)
+    next_reset_at = Column(DateTime(timezone=True), nullable=True)
+    plan_tier = Column(String, nullable=False, server_default="Starter")
+    plan_recommendation = Column(String, nullable=True)
+    personal_usage_percent = Column(Integer, nullable=False, server_default="0")
+    breakdown_rows = Column(JSONB, nullable=False, server_default="[]")
+    history_rows = Column(JSONB, nullable=False, server_default="[]")
+    member_shares = Column(JSONB, nullable=False, server_default="[]")
+    highlights = Column(JSONB, nullable=False, server_default="[]")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", backref="usage_stats")
 
 
 class WorkspaceMember(Base):
@@ -117,7 +163,7 @@ class ProjectMember(Base):
     __tablename__ = "project_members"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String, nullable=False, default="viewer")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -238,8 +284,12 @@ class Project(Base):
     description = Column(String)
     goals = Column(String)
     north_star_metric = Column(String)
+    color = Column(String, nullable=True)
+    attributes = Column(JSONB, nullable=True)
+    website_url = Column(String, nullable=True)
     target_personas = Column(ARRAY(String), nullable=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
     roadmaps = relationship("Roadmap", back_populates="project", cascade="all, delete-orphan")
@@ -270,7 +320,7 @@ class Roadmap(Base):
     __tablename__ = "roadmaps"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -392,6 +442,7 @@ class PRD(Base):
     created_by_user = relationship("User")
     decision_notes = relationship("PRDDecisionNote", back_populates="prd", cascade="all, delete-orphan")
     embeddings = relationship("PRDEmbedding", back_populates="prd", cascade="all, delete-orphan")
+    chat_messages = relationship("PRDChatMessage", back_populates="prd", cascade="all, delete-orphan")
 
 
 class PRDDecisionNote(Base):
@@ -428,6 +479,21 @@ class PRDEmbedding(Base):
 
     prd = relationship("PRD", back_populates="embeddings")
     decision_note = relationship("PRDDecisionNote")
+
+
+class PRDChatMessage(Base):
+    __tablename__ = "prd_chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    prd_id = Column(UUID(as_uuid=True), ForeignKey("prds.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    prd = relationship("PRD", back_populates="chat_messages")
 
 
 
@@ -481,6 +547,9 @@ class AIAgent(Base):
     max_tokens = Column(Integer, nullable=True)
     instructions = Column(Text, nullable=False)
     tools = Column(JSONB, default=dict)
+    capabilities = Column(JSONB, default=list)
+    context_config = Column(JSONB, default=dict)
+    context_tag = Column(String, nullable=True)
     modules = Column(ARRAY(String), default=list)
     mcp_connection_ids = Column(ARRAY(UUID(as_uuid=True)), default=list)
     is_public = Column(Boolean, nullable=False, default=False)
@@ -489,7 +558,11 @@ class AIAgent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    workspace = relationship("Workspace", back_populates="ai_agents")
+    workspace = relationship(
+        "Workspace",
+        back_populates="ai_agents",
+        foreign_keys=[workspace_id],
+    )
     creator = relationship("User")
     cloned_from = relationship("AIAgent", remote_side=[id], backref="clones")
     project_assignments = relationship("ProjectAgent", back_populates="agent", cascade="all, delete-orphan")
@@ -645,11 +718,13 @@ class Task(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    task_board_id = Column(UUID(as_uuid=True), ForeignKey("task_boards.id", ondelete="SET NULL"), nullable=True)
     epic_id = Column(UUID(as_uuid=True), ForeignKey("epics.id", ondelete="SET NULL"), nullable=True)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="todo")
     priority = Column(String, nullable=False, default="medium")
+    position = Column(Integer, nullable=False, default=0)
     assignee_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=True)
     ai_generated = Column(Boolean, nullable=False, default=False)
@@ -661,6 +736,7 @@ class Task(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     project = relationship("Project", back_populates="tasks")
+    task_board = relationship("TaskBoard", back_populates="tasks")
     epic = relationship("ProjectEpic")
     assignee = relationship("User", foreign_keys=[assignee_id])
     creator = relationship("User", foreign_keys=[created_by])
@@ -678,6 +754,23 @@ class TaskComment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     task = relationship("Task", back_populates="comments")
+
+
+class TaskBoard(Base):
+    __tablename__ = "task_boards"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", backref="task_boards")
+    project = relationship("Project", backref="task_boards")
+    tasks = relationship("Task", back_populates="task_board")
 
 
 class BuilderPrototype(Base):

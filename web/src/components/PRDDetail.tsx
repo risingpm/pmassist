@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getPrd,
   refinePrd,
@@ -23,6 +22,7 @@ import PRDVersionHistory from "./PRDVersionHistory";
 import PRDDiffView from "./PRDDiffView";
 import PRDQAPanel from "./PRDQAPanel";
 import DecisionNotes from "./DecisionNotes";
+import SafeMarkdown from "./SafeMarkdown";
 import {
   SURFACE_CARD,
   SECTION_LABEL,
@@ -38,9 +38,19 @@ type PRDDetailProps = {
   workspaceId: string | null;
   projectRole: ProjectRole;
   onBack: () => void;
+  initialSidePanel?: "assist" | "history";
+  focusSection?: "decision";
 };
 
-export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, onBack }: PRDDetailProps) {
+export default function PRDDetail({
+  projectId,
+  prdId,
+  workspaceId,
+  projectRole,
+  onBack,
+  initialSidePanel,
+  focusSection,
+}: PRDDetailProps) {
   const [activePrdId, setActivePrdId] = useState(prdId);
   const [prd, setPrd] = useState<PRDRecord | null>(null);
   const [loading, setLoading] = useState(false);
@@ -58,8 +68,10 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
   const [diffSummary, setDiffSummary] = useState<string | null>(null);
   const [summarizingDiff, setSummarizingDiff] = useState(false);
   const [rebuildingEmbeddings, setRebuildingEmbeddings] = useState(false);
-  const [sidePanel, setSidePanel] = useState<"assist" | "history">("assist");
+  const [sidePanel, setSidePanel] = useState<"assist" | "history">(initialSidePanel ?? "assist");
   const canEdit = projectRole === "owner" || projectRole === "contributor";
+  const decisionFocusHandledRef = useRef(false);
+  const decisionNotesAnchorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setActivePrdId(prdId);
@@ -97,6 +109,27 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
     };
     fetchPrd();
   }, [projectId, activePrdId, workspaceId]);
+
+  useEffect(() => {
+    if (!initialSidePanel) return;
+    setSidePanel(initialSidePanel);
+  }, [initialSidePanel]);
+
+  useEffect(() => {
+    decisionFocusHandledRef.current = false;
+  }, [focusSection, activePrdId]);
+
+  useEffect(() => {
+    if (focusSection !== "decision") return;
+    if (sidePanel !== "history") {
+      setSidePanel("history");
+      return;
+    }
+    if (decisionFocusHandledRef.current) return;
+    if (!decisionNotesAnchorRef.current) return;
+    decisionFocusHandledRef.current = true;
+    decisionNotesAnchorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focusSection, sidePanel, historyLoading]);
 
   const handleRefine = async () => {
     if (!refineText.trim() || !canEdit || !workspaceId) return;
@@ -304,9 +337,7 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
               <div className="flex min-h-0 flex-1 flex-col">
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Preview</p>
                 <div className="mt-2 flex-1 overflow-auto rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                  <div className="prose prose-sm max-w-none">
-                    <ReactMarkdown>{previewContent}</ReactMarkdown>
-                  </div>
+                  <SafeMarkdown className="text-base text-slate-900">{previewContent}</SafeMarkdown>
                 </div>
               </div>
             </div>
@@ -396,14 +427,16 @@ export default function PRDDetail({ projectId, prdId, workspaceId, projectRole, 
                     }}
                     className="shadow-sm"
                   />
-                  <DecisionNotes
-                    projectId={projectId}
-                    prdId={activePrdId}
-                    workspaceId={workspaceId}
-                    currentVersion={activeVersion}
-                    projectRole={projectRole}
-                    className="shadow-sm"
-                  />
+                  <div ref={decisionNotesAnchorRef}>
+                    <DecisionNotes
+                      projectId={projectId}
+                      prdId={activePrdId}
+                      workspaceId={workspaceId}
+                      currentVersion={activeVersion}
+                      projectRole={projectRole}
+                      className="shadow-sm"
+                    />
+                  </div>
                 </div>
               )}
             </div>

@@ -1,8 +1,20 @@
-import { useCallback, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { GoogleLogin, GoogleOAuthProvider, type CredentialResponse } from "@react-oauth/google";
 
-import { loginWithGoogle, getUserAgent, getUserWorkspaces, initializeWorkspace, type AuthResponse } from "../api";
+import {
+  acceptWorkspaceInvitation,
+  getWorkspaceInvitationByToken,
+  loginWithGoogle,
+  login,
+  signup,
+  getUserAgent,
+  getUserWorkspaces,
+  initializeWorkspace,
+  type AuthResponse,
+  type WorkspaceInvitation,
+} from "../api";
 import {
   AUTH_USER_KEY,
   USER_ID_KEY,
@@ -47,9 +59,52 @@ const extractErrorMessage = (value: unknown): string => {
 
 export default function SignInPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const inviteToken = useMemo(() => {
+    const raw = searchParams.get("invite");
+    return raw ? raw.trim() : null;
+  }, [searchParams]);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [inviteInfo, setInviteInfo] = useState<WorkspaceInvitation | null>(null);
+  const [inviteBanner, setInviteBanner] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
+  useEffect(() => {
+    if (!inviteToken) {
+      setInviteInfo(null);
+      setInviteBanner(null);
+      return;
+    }
+    let canceled = false;
+    setInviteBanner({
+      tone: "info",
+      message: "Confirming your invitation…",
+    });
+    getWorkspaceInvitationByToken(inviteToken)
+      .then((invite) => {
+        if (canceled) return;
+        setInviteInfo(invite);
+        setInviteBanner({
+          tone: "success",
+          message: `Invitation confirmed${invite.workspace_name ? ` for ${invite.workspace_name}` : ""}. Continue below to join.`,
+        });
+        setEmail((prev) => prev || invite.email);
+      })
+      .catch((err) => {
+        if (canceled) return;
+        setInviteInfo(null);
+        setInviteBanner({
+          tone: "error",
+          message: extractErrorMessage(err),
+        });
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [inviteToken]);
   const ensureDemoInitialized = useCallback(
     async (authResult: AuthResponse) => {
       if (typeof window === "undefined" || !authResult.id) return null;
@@ -74,6 +129,31 @@ export default function SignInPage() {
     []
   );
 
+  const acceptInviteIfNeeded = useCallback(
+    async (userId: string) => {
+      if (!inviteToken) return;
+      setInviteBanner({
+        tone: "info",
+        message: "Finalizing your workspace invitation…",
+      });
+      try {
+        await acceptWorkspaceInvitation(inviteToken, userId);
+        setInviteBanner({
+          tone: "success",
+          message: "Invitation accepted! Redirecting you to your workspace…",
+        });
+      } catch (err) {
+        const message = extractErrorMessage(err);
+        setInviteBanner({
+          tone: "error",
+          message,
+        });
+        throw new Error(message);
+      }
+    },
+    [inviteToken]
+  );
+
   const persistSession = (authResult: AuthResponse, workspaceId: string | null, workspaceName: string | null) => {
     if (typeof window !== "undefined") {
       window.sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(authResult));
@@ -87,10 +167,18 @@ export default function SignInPage() {
     let workspaceId = authResult.workspace_id ?? null;
     let workspaceName = authResult.workspace_name ?? null;
 
-    const initResult = await ensureDemoInitialized(authResult);
-    if (initResult) {
-      workspaceId = workspaceId ?? initResult.workspace_id ?? null;
-      workspaceName = workspaceName ?? "Demo Workspace";
+    if (inviteToken) {
+      await acceptInviteIfNeeded(authResult.id);
+      if (!workspaceId && inviteInfo) {
+        workspaceId = inviteInfo.workspace_id;
+        workspaceName = inviteInfo.workspace_name ?? workspaceName;
+      }
+    } else {
+      const initResult = await ensureDemoInitialized(authResult);
+      if (initResult) {
+        workspaceId = workspaceId ?? initResult.workspace_id ?? null;
+        workspaceName = workspaceName ?? "Demo Workspace";
+      }
     }
     if (!workspaceId) {
       try {
@@ -154,6 +242,25 @@ export default function SignInPage() {
     setError("Unable to sign in with Google. Please try again.");
   };
 
+  const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!email || !password) {
+      setError("Enter both email and password.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const payload = { email: email.trim(), password };
+      const authResult = authMode === "signin" ? await login(payload) : await signup(payload);
+      await completeSignIn(authResult);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 px-4 py-10">
       <div className="mx-auto flex max-w-3xl flex-col gap-10 rounded-[32px] bg-white p-10 shadow-2xl">
@@ -166,11 +273,95 @@ export default function SignInPage() {
         </header>
 
         <div className="space-y-6">
+          {inviteBanner && (
+            <div
+              className={`rounded-2xl px-4 py-3 text-sm ${
+                inviteBanner.tone === "success"
+                  ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : inviteBanner.tone === "error"
+                    ? "border border-rose-200 bg-rose-50 text-rose-600"
+                    : "border border-slate-200 bg-slate-50 text-slate-600"
+              }`}
+            >
+              {inviteBanner.message}
+            </div>
+          )}
           {error && (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
               {error}
             </div>
           )}
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/60 p-6 shadow-inner">
+            <div className="flex rounded-full bg-white p-1 text-sm font-semibold text-slate-500">
+              {(["signin", "signup"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setAuthMode(mode)}
+                  className={`flex-1 rounded-full px-4 py-2 transition ${
+                    authMode === mode ? "bg-slate-900 text-white shadow" : "hover:text-slate-900"
+                  }`}
+                >
+                  {mode === "signin" ? "Email sign in" : "Create account"}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-slate-700">
+                Email
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-2 text-base text-slate-900 outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+                  autoComplete="email"
+                />
+              </label>
+              {inviteInfo && (
+                <p className="text-xs text-slate-500">
+                  Invitation sent to <span className="font-semibold text-slate-900">{inviteInfo.email}</span>
+                  {inviteInfo.workspace_name ? ` · Workspace: ${inviteInfo.workspace_name}` : ""}. Use this email to join.
+                </p>
+              )}
+              <label className="block text-sm font-semibold text-slate-700">
+                Password
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-2 text-base text-slate-900 outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900"
+                  autoComplete={authMode === "signin" ? "current-password" : "new-password"}
+                  minLength={6}
+                />
+              </label>
+            </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isSubmitting ? "Processing…" : authMode === "signin" ? "Sign in with email" : "Create account"}
+            </button>
+            <p className="text-center text-xs text-slate-500">
+              {authMode === "signin" ? "Need an account?" : "Already have an account?"}{" "}
+              <button
+                type="button"
+                className="font-semibold text-slate-900 underline-offset-2 hover:underline"
+                onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+              >
+                {authMode === "signin" ? "Create one" : "Sign in"}
+              </button>
+            </p>
+          </form>
+
+          <div className="flex items-center gap-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" />
+            Or continue with
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
 
           {googleClientId ? (
             <GoogleOAuthProvider clientId={googleClientId}>

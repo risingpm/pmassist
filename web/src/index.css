@@ -14,9 +14,10 @@ body {
 }
 
 .markdown-body {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.7;
   color: #0f172a;
+  max-width: 780px;
 }
 
 .markdown-body h1,
@@ -24,41 +25,75 @@ body {
 .markdown-body h3,
 .markdown-body h4 {
   font-weight: 600;
-  margin: 1.2em 0 0.4em;
+  margin: 1.5em 0 0.6em;
+  letter-spacing: -0.01em;
 }
 
 .markdown-body h1 {
-  font-size: 1.25rem;
+  font-size: 1.35rem;
 }
 
 .markdown-body h2 {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding-bottom: 0.35em;
+}
+
+.markdown-body h3 {
+  font-size: 1rem;
+  text-transform: uppercase;
+  color: #475569;
+  letter-spacing: 0.08em;
 }
 
 .markdown-body p {
-  margin: 0.5em 0;
+  margin: 0.45em 0;
 }
 
 .markdown-body ul,
 .markdown-body ol {
-  margin: 0.5em 0 0.5em 1.25em;
+  margin: 0.5em 0 0.5em 1.5em;
   padding-left: 1.25em;
 }
 
 .markdown-body li {
-  margin-bottom: 0.25em;
+  margin-bottom: 0.35em;
+}
+
+.markdown-body li strong {
+  display: inline-block;
+  min-width: 130px;
 }
 
 .markdown-body strong {
   font-weight: 600;
 }
 
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95em;
+}
+
+.markdown-body table th,
+.markdown-body table td {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  padding: 0.6em 0.8em;
+  text-align: left;
+}
+
 .markdown-body pre {
   background: #0f172a;
   color: #e2e8f0;
   border-radius: 12px;
-  padding: 0.75rem;
+  padding: 0.9rem;
   overflow-x: auto;
+}
+
+.markdown-body code {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.9em;
 }
 
 a {
@@ -120,6 +155,42 @@ a {
   padding-left: 18px;
   font-size: 12px;
   color: #2563eb;
+}
+
+.chat-typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+}
+
+.chat-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #94a3b8;
+  opacity: 0.3;
+  animation: chatTyping 1.2s infinite ease-in-out;
+}
+
+.chat-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chatTyping {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateY(-2px);
+  }
 }
 
 .prototype-screen .notes {

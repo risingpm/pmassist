@@ -54,18 +54,6 @@ export default function WorkspaceKnowledgePage() {
       .finally(() => setLoadingProjects(false));
   }, [workspaceId]);
 
-  const navItems = useMemo(() => {
-    if (!workspaceId) return [];
-    return [
-      { label: "Dashboard", path: `/workspaces/${workspaceId}/dashboard`, active: false },
-      { label: "Projects", path: `/workspaces/${workspaceId}/projects`, active: false },
-      { label: "Knowledge", path: `/workspaces/${workspaceId}/knowledge`, active: true },
-      { label: "Templates", path: `/workspaces/${workspaceId}/templates`, active: false },
-      { label: "Members", path: `/workspaces/${workspaceId}/projects/members`, active: false },
-      { label: "Settings", path: `/workspaces/${workspaceId}/settings`, active: false },
-    ];
-  }, [workspaceId]);
-
   const projectOptions = projects;
 
   return (
@@ -94,23 +82,6 @@ export default function WorkspaceKnowledgePage() {
             </button>
           </div>
         </header>
-
-        {navItems.length > 0 && (
-          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
-            {navItems.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => navigate(item.path)}
-                className={`rounded-full px-4 py-2 ${
-                  item.active ? "bg-slate-900 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
 
         {projectError && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{projectError}</div>

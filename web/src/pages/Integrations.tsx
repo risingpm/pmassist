@@ -1,722 +1,592 @@
-import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 
-import type { GitHubRepoRecord, GitHubWorkspaceContext, KnowledgeEntryRecord } from "../api";
-import { fetchUserRepos, getGitHubContext, startGitHubAuth, syncGitHubRepo } from "../api";
-import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WIDE_PAGE_CONTAINER } from "../constants";
-import { SECTION_LABEL, BODY_SUBTLE, PRIMARY_BUTTON, SECONDARY_BUTTON } from "../styles/theme";
+import {
+  deleteWorkspaceAIProvider,
+  getWorkspaceAIProviderStatus,
+  saveWorkspaceAIProvider,
+  testWorkspaceAIProvider,
+} from "../api";
+import { AUTH_USER_KEY, USER_ID_KEY } from "../constants";
 
-function formatDate(value?: string | null) {
-  if (!value) return "Never";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
+function IconBack() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none">
+      <path d="M12.5 4.5L7 10l5.5 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
-function latestInsight(repo: GitHubRepoRecord | null): GitHubRepoRecord["insights"][number] | null {
-  if (!repo || !repo.insights || repo.insights.length === 0) return null;
-  return [...repo.insights].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+function IconSparkles() {
+  return (
+    <svg aria-hidden="true" className="h-6 w-6" viewBox="0 0 24 24" fill="none">
+      <path d="M12 3.5l1.7 4.8L18.5 10l-4.8 1.7L12 16.5l-1.7-4.8L5.5 10l4.8-1.7L12 3.5Z" stroke="white" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M19.2 2.8v2.3M20.35 3.95h-2.3M3.65 17.95v2.3M4.8 19.1H2.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
 }
 
-function groupKnowledge(entries: KnowledgeEntryRecord[]) {
-  return entries.reduce<Record<string, KnowledgeEntryRecord[]>>((acc, entry) => {
-    const key = entry.entry_type;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(entry);
-    return acc;
-  }, {});
+function IconBrain() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 20 20" fill="none">
+      <path
+        d="M8.2 3.6a2.4 2.4 0 0 0-3.2 2.2c0 .2 0 .4.1.6A2.8 2.8 0 0 0 3.5 9c0 1 .5 1.8 1.2 2.3v.2a2.5 2.5 0 0 0 2.5 2.5h.2A2.7 2.7 0 0 0 10 16.2V8.3a2.5 2.5 0 0 0-1.8-4.7Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M11.8 3.6a2.4 2.4 0 0 1 3.2 2.2c0 .2 0 .4-.1.6A2.8 2.8 0 0 1 16.5 9c0 1-.5 1.8-1.2 2.3v.2a2.5 2.5 0 0 1-2.5 2.5h-.2a2.7 2.7 0 0 1-2.6 2.2V8.3a2.5 2.5 0 0 1 1.8-4.7Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
-type NormalizedPillar = {
-  title: string;
-  summary?: string;
-  problem?: string;
-  valueAdd?: string;
-  nextSteps: string[];
-  supportingAssets: string[];
-  implementationNotes: string[];
-  apiEndpoints: string[];
-};
-
-const asString = (value: unknown): string | undefined => {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-};
-
-const asStringArray = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter((item): item is string => Boolean(item));
-  }
-  const single = asString(value);
-  return single ? [single] : [];
-};
-
-const dedupeStrings = (values: string[]): string[] => {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of values) {
-    const key = value.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(value);
-  }
-  return result;
-};
-
-const endpointToString = (value: unknown): string | undefined => {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed || undefined;
-  }
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const record = value as Record<string, unknown>;
-    const method = asString(record["method"]) ?? asString(record["http_method"]) ?? asString(record["verb"]);
-    const path =
-      asString(record["path"]) ??
-      asString(record["endpoint"]) ??
-      asString(record["url"]) ??
-      asString(record["route"]);
-    const name = asString(record["name"]) ?? asString(record["title"]);
-    const description = asString(record["description"]) ?? asString(record["summary"]) ?? asString(record["details"]);
-    const primary = [method ? method.toUpperCase() : null, path || name].filter(Boolean).join(" ");
-    if (primary && description) return `${primary} – ${description}`;
-    if (primary) return primary;
-    if (description) return description;
-  }
-  return undefined;
-};
-
-const asEndpointArray = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return dedupeStrings(
-      value
-        .map(endpointToString)
-        .filter((item): item is string => Boolean(item))
-    );
-  }
-  const single = endpointToString(value);
-  return single ? [single] : [];
-};
-
-function normalizeStrategicPillar(pillar: unknown): NormalizedPillar | null {
-  if (pillar == null) return null;
-  if (typeof pillar === "string") {
-    const text = pillar.trim();
-    if (!text) return null;
-    return {
-      title: text,
-      apiEndpoints: [],
-      nextSteps: [],
-      supportingAssets: [],
-      implementationNotes: [],
-    };
-  }
-  if (typeof pillar === "object" && !Array.isArray(pillar)) {
-    const record = pillar as Record<string, unknown>;
-    const title =
-      asString(record["use_case"]) ??
-      asString(record["title"]) ??
-      asString(record["name"]) ??
-      asString(record["problem"]) ??
-      asString(record["summary"]) ??
-      "Strategic Pillar";
-    const nextSteps = dedupeStrings(asStringArray(record["next_steps"]));
-    const supportingAssets = dedupeStrings(asStringArray(record["supporting_assets"]));
-    const implementationNotes = dedupeStrings(asStringArray(record["implementation_notes"]));
-    const apiEndpoints = asEndpointArray(
-      record["api_endpoints"] ?? record["endpoints"] ?? record["key_endpoints"] ?? record["api_surface"] ?? record["apis"]
-    );
-    return {
-      title,
-      summary: asString(record["summary"]),
-      problem: asString(record["problem"]),
-      valueAdd: asString(record["value_add"]),
-      nextSteps,
-      supportingAssets,
-      implementationNotes,
-      apiEndpoints,
-    };
-  }
-  const fallback = String(pillar).trim();
-  if (!fallback) return null;
-  return {
-    title: fallback,
-    apiEndpoints: [],
-    nextSteps: [],
-    supportingAssets: [],
-    implementationNotes: [],
-  };
+function IconLinkOut() {
+  return (
+    <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 12 12" fill="none">
+      <path d="M4 2h6v6M10 2 5.5 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8.5 6.5v3h-6v-6h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
-export { normalizeStrategicPillar };
+function IconKey() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none">
+      <circle cx="7" cy="10" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M10 10h7M14 10v2M16 10v1.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
 
-function collectStrategicPillars(
-  repo: GitHubRepoRecord,
-  insights: GitHubRepoRecord["insights"],
-  knowledgeEntries: KnowledgeEntryRecord[]
-): NormalizedPillar[] {
-  const unique = new Map<string, NormalizedPillar>();
+function IconDoc() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none">
+      <path d="M4.5 4h11v12h-11z" stroke="currentColor" strokeWidth="1.5" rx="2" />
+      <path d="M7 8h6M7 11h6M7 14h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
-  const addPillar = (pillar: NormalizedPillar | null) => {
-    if (!pillar) return;
-    const key = [
-      pillar.title.toLowerCase(),
-      pillar.summary ?? "",
-      pillar.problem ?? "",
-      pillar.valueAdd ?? "",
-      pillar.nextSteps.join("|"),
-      pillar.supportingAssets.join("|"),
-      pillar.implementationNotes.join("|"),
-      pillar.apiEndpoints.join("|"),
-    ].join("||");
-    if (!unique.has(key)) {
-      unique.set(key, pillar);
-    }
-  };
+function IconCheck() {
+  return (
+    <svg aria-hidden="true" className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none">
+      <path d="M3.2 8.2 6.2 11l6.6-6.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
-  const sorted = [...(insights ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  for (const insight of sorted) {
-    const normalized = (insight?.strategic_pillars ?? [])
-      .map(normalizeStrategicPillar)
-      .filter((pillar): pillar is NormalizedPillar => pillar !== null);
-    normalized.forEach(addPillar);
+function IconClose() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 16 16" fill="none">
+      <path d="M3.5 3.5 12.5 12.5M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconEye() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 16 16" fill="none">
+      <path d="M1.5 8s2.2-4 6.5-4 6.5 4 6.5 4-2.2 4-6.5 4-6.5-4-6.5-4Z" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="8" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function IconEyeOff() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 16 16" fill="none">
+      <path d="M1.5 8s2.2-4 6.5-4 6.5 4 6.5 4-2.2 4-6.5 4-6.5-4-6.5-4Z" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 2.5 13.5 13.5" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function IconWarning() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 16 16" fill="none">
+      <path d="M8 2.3 14.2 13H1.8L8 2.3Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M8 6v3.5M8 11.8v.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 16 16" fill="none">
+      <path d="M2.5 4h11M6.2 2.5h3.6M5 4v8m3-8v8m3-8v8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+type ToastTone = "success" | "error";
+
+type ToastState = {
+  tone: ToastTone;
+  message: string;
+};
+
+function asCompactKey(masked: string | null | undefined, suffix: string | null | undefined) {
+  if (suffix && suffix.trim()) {
+    return `••••••${suffix.trim()}`;
   }
-
-  const repoEntries = knowledgeEntries.filter((entry) => entry.entry_type === "product_use_case");
-
-  for (const entry of repoEntries) {
-    const metadata =
-      entry.metadata && typeof entry.metadata === "object"
-        ? (entry.metadata as Record<string, unknown>)
-        : {};
-
-    const metadataRepo = asString(metadata["repo_full_name"]);
-    const matchesRepo =
-      (entry.repo_id && entry.repo_id === repo.id) ||
-      (metadataRepo && metadataRepo.toLowerCase() === repo.repo_full_name.toLowerCase());
-
-    if (!matchesRepo) continue;
-
-    const pillar: NormalizedPillar = {
-      title:
-        asString(metadata["use_case"]) ??
-        asString(metadata["title"]) ??
-        asString(metadata["name"]) ??
-        entry.title ??
-        "Product Use Case",
-      summary: asString(metadata["summary"]),
-      problem: asString(metadata["problem"]),
-      valueAdd: asString(metadata["value_add"]),
-      nextSteps: dedupeStrings(asStringArray(metadata["next_steps"])),
-      supportingAssets: dedupeStrings(asStringArray(metadata["supporting_assets"])),
-      implementationNotes: dedupeStrings(asStringArray(metadata["implementation_notes"])),
-      apiEndpoints: asEndpointArray(metadata["api_endpoints"]),
-    };
-    addPillar(pillar);
+  if (!masked) {
+    return "••••••••";
   }
-
-  return Array.from(unique.values());
+  return masked.replace(/\*/g, "•").slice(0, 8);
 }
 
 export default function IntegrationsPage() {
   const navigate = useNavigate();
-  const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
 
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-
-  const [context, setContext] = useState<GitHubWorkspaceContext | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [maskedKey, setMaskedKey] = useState("••••••••");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [availableRepos, setAvailableRepos] = useState<Array<Record<string, unknown>>>([]);
-  const [loadingRepos, setLoadingRepos] = useState(false);
-  const [syncingRepo, setSyncingRepo] = useState<string | null>(null);
+
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [draftApiKey, setDraftApiKey] = useState("");
+  const [draftOrganization, setDraftOrganization] = useState("");
+  const [draftProject, setDraftProject] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const hasUser = window.sessionStorage.getItem(AUTH_USER_KEY);
-    if (!hasUser) {
+    const auth = window.sessionStorage.getItem(AUTH_USER_KEY);
+    const uid = window.sessionStorage.getItem(USER_ID_KEY);
+    if (!auth) {
       navigate("/signin", { replace: true });
       return;
     }
-    const storedWorkspace = window.sessionStorage.getItem(WORKSPACE_ID_KEY);
-    const storedUser = window.sessionStorage.getItem(USER_ID_KEY);
-    setWorkspaceId(storedWorkspace);
-    setUserId(storedUser);
+    setUserId(uid);
   }, [navigate]);
 
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId || !userId) return;
     setLoading(true);
-    setError(null);
-    getGitHubContext(workspaceId)
-      .then(setContext)
-      .catch((err) => setError(err instanceof Error ? err.message : "Unable to load integration context"))
+    getWorkspaceAIProviderStatus(workspaceId, userId)
+      .then((result) => {
+        setConnected(Boolean(result.has_api_key));
+        setMaskedKey(asCompactKey(result.masked_key_preview, result.key_suffix));
+      })
+      .catch((error) => {
+        setConnected(false);
+        setToast({
+          tone: "error",
+          message: error instanceof Error ? error.message : "Failed to load OpenAI integration status.",
+        });
+      })
       .finally(() => setLoading(false));
-  }, [workspaceId]);
+  }, [workspaceId, userId]);
 
   useEffect(() => {
-    if (!context) return;
-    const groups = groupKnowledge(context.knowledge_entries || []);
-    if (groups.insight && groups.insight.length > 0) {
-      setSuccess("Strategic insights available from your latest sync.");
-    }
-  }, [context]);
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 2800);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   useEffect(() => {
-    if (!location.search) return;
-    const params = new URLSearchParams(location.search);
-    if (params.get("connected")) {
-      setSuccess("GitHub account connected successfully.");
-      params.delete("connected");
-      navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
-    }
-  }, [location, navigate]);
+    if (!isConfigOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsConfigOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isConfigOpen]);
 
-  useEffect(() => {
-    if (!success && !error) return;
-    const timer = window.setTimeout(() => {
-      setSuccess(null);
-      setError(null);
-    }, 4000);
-    return () => window.clearTimeout(timer);
-  }, [success, error]);
-
-  const handleConnect = async () => {
-    if (!workspaceId || !userId) {
-      setError("Missing workspace context");
-      return;
-    }
-    try {
-      const { authorize_url } = await startGitHubAuth(workspaceId, userId);
-      window.location.href = authorize_url;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to start GitHub OAuth");
-    }
+  const resetConfigForm = () => {
+    setDraftApiKey("");
+    setDraftOrganization("");
+    setDraftProject("");
+    setShowApiKey(false);
   };
 
-  const handleLoadRepos = async () => {
-    if (!workspaceId || !userId) {
-      setError("Missing workspace context");
+  const openConfigModal = () => {
+    resetConfigForm();
+    setIsConfigOpen(true);
+  };
+
+  const closeConfigModal = () => {
+    setIsConfigOpen(false);
+    resetConfigForm();
+  };
+
+  const handleSaveConfiguration = async () => {
+    if (!workspaceId || !userId || !draftApiKey.trim()) {
+      setToast({ tone: "error", message: "OpenAI API key is required." });
       return;
     }
-    setLoadingRepos(true);
+    setSaving(true);
     try {
-      const data = await fetchUserRepos(workspaceId, userId);
-      setAvailableRepos(data.available_repos ?? []);
-      const refreshed = await getGitHubContext(workspaceId);
-      setContext(refreshed);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to fetch repositories");
+      const result = await saveWorkspaceAIProvider(workspaceId, {
+        api_key: draftApiKey.trim(),
+        organization: draftOrganization.trim() || null,
+        project: draftProject.trim() || null,
+        user_id: userId,
+      });
+      setConnected(Boolean(result.has_api_key));
+      setMaskedKey(asCompactKey(result.masked_key_preview, result.key_suffix));
+      closeConfigModal();
+      setToast({ tone: "success", message: "OpenAI integration configured successfully!" });
+    } catch (error) {
+      setToast({ tone: "error", message: error instanceof Error ? error.message : "Failed to save OpenAI integration." });
     } finally {
-      setLoadingRepos(false);
+      setSaving(false);
     }
   };
 
-  const handleSyncRepo = async (repoFullName: string) => {
-    if (!workspaceId || !userId) {
-      setError("Missing workspace context");
-      return;
-    }
-    setSyncingRepo(repoFullName);
+  const handleTestSavedConnection = async () => {
+    if (!workspaceId || !userId) return;
+    setTesting(true);
     try {
-      await syncGitHubRepo(workspaceId, userId, { repo_full_name: repoFullName, force: true });
-      const refreshed = await getGitHubContext(workspaceId);
-      setContext(refreshed);
-      setSuccess(`Synced ${repoFullName}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sync repository");
+      await testWorkspaceAIProvider(workspaceId, {
+        use_saved_key: true,
+        user_id: userId,
+      });
+      setToast({ tone: "success", message: "Connection test passed." });
+    } catch (error) {
+      setToast({ tone: "error", message: error instanceof Error ? error.message : "Connection test failed." });
     } finally {
-      setSyncingRepo(null);
+      setTesting(false);
     }
   };
 
-  const connectedRepos = useMemo(() => {
-    if (!context) return [] as GitHubRepoRecord[];
-    return context.connections.flatMap((connection) => connection.repos);
-  }, [context]);
+  const handleRemoveIntegration = async () => {
+    if (!workspaceId || !userId) return;
+    setRemoving(true);
+    try {
+      await deleteWorkspaceAIProvider(workspaceId, userId);
+      setConnected(false);
+      setMaskedKey("••••••••");
+      setToast({ tone: "success", message: "OpenAI integration removed." });
+    } catch (error) {
+      setToast({ tone: "error", message: error instanceof Error ? error.message : "Failed to remove OpenAI integration." });
+    } finally {
+      setRemoving(false);
+    }
+  };
 
-  const knowledgeGroups = useMemo(() => groupKnowledge(context?.knowledge_entries ?? []), [context]);
-  const workspaceKnowledgeEntries = context?.knowledge_entries ?? [];
-  const navItems = useMemo(() => {
-    if (!workspaceId) return [];
-    return [
-      { label: "Dashboard", path: `/workspaces/${workspaceId}/dashboard`, active: false },
-      { label: "Projects", path: `/workspaces/${workspaceId}/projects`, active: false },
-      { label: "Knowledge", path: `/workspaces/${workspaceId}/knowledge`, active: false },
-      { label: "Integrations", path: `/workspaces/${workspaceId}/integrations`, active: true },
-      { label: "Templates", path: `/workspaces/${workspaceId}/templates`, active: false },
-      { label: "Settings", path: `/workspaces/${workspaceId}/settings`, active: false },
-    ];
-  }, [workspaceId]);
+  if (!workspaceId) return null;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className={`${WIDE_PAGE_CONTAINER} space-y-6 py-8`}>
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className={SECTION_LABEL}>Integrations</p>
-            <h1 className="text-3xl font-semibold text-slate-900">Connect GitHub</h1>
-            <p className={BODY_SUBTLE}>
-              Sync repositories to unlock AI-powered roadmap, PRD, and strategic insights.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate(workspaceId ? `/workspaces/${workspaceId}/projects` : "/projects")}
-              className={SECONDARY_BUTTON}
-            >
-              Back to workspace
-            </button>
-            <button type="button" onClick={handleConnect} className={PRIMARY_BUTTON}>
-              Connect GitHub
-            </button>
-          </div>
-        </header>
+    <div className="min-h-screen bg-[#f9fafb]">
+      <header className="border-b border-[#e5e7eb] bg-white px-8 py-6">
+        <button
+          type="button"
+          className="mb-3 inline-flex items-center gap-2 text-[14px] font-medium text-[#0a0a0a]"
+          onClick={() => navigate(`/workspaces/${workspaceId}/home`)}
+        >
+          <IconBack />
+          Back to Dashboard
+        </button>
+        <h1 className="text-[30px] font-bold leading-tight text-[#101828]">Integrations</h1>
+        <p className="mt-1 text-[16px] text-[#4a5565]">Connect your own AI models and external services to power your workspace</p>
+      </header>
 
-        {navItems.length > 0 && (
-          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
-            {navItems.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => navigate(item.path)}
-                className={`rounded-full px-4 py-2 ${
-                  item.active ? "bg-slate-900 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <main className="space-y-8">
-        {(success || error) && (
-          <div
-            className={`mb-6 rounded-2xl px-4 py-3 text-sm font-medium ${
-              success ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"
-            }`}
-          >
-            {success || error}
-          </div>
-        )}
-
-        <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+      <main className="px-8 py-8">
+        <section className="rounded-[14px] border border-[#e9d4ff] bg-gradient-to-r from-[#faf5ff] to-[#eff6ff] p-6">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-[10px] bg-[#9810fa]">
+              <IconSparkles />
+            </div>
             <div>
-              <h2 className="text-2xl font-semibold text-slate-900">GitHub Integration</h2>
-              <p className="mt-2 max-w-2xl text-sm text-slate-500">
-                Connect a GitHub repository to automatically sync repo metadata, documentation, commits, and code summaries. AI will
-                translate this context into strategic pillars, a roadmap, and draft PRDs for your workspace.
+              <h2 className="text-[28px] font-semibold text-[#101828]">Use Your Own AI Models</h2>
+              <p className="mt-1 max-w-[1020px] text-[14px] leading-[22px] text-[#364153]">
+                Configure your own OpenAI API key to use GPT models across the platform. Your key is stored securely and used to power
+                PRD generation, roadmap planning, and agent workflows in your workspace.
               </p>
-            </div>
-            <button onClick={handleConnect} className={PRIMARY_BUTTON}>
-              Connect GitHub
-            </button>
-          </div>
-
-          <div className="mt-6 grid gap-6 md:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 p-5">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Connected Repositories</h3>
-              {loading ? (
-                <p className="mt-3 text-sm text-slate-500">Loading integration details...</p>
-              ) : connectedRepos.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No repositories synced yet.</p>
-              ) : (
-                <ul className="mt-4 space-y-4">
-              {connectedRepos.map((repo) => {
-                const insight = latestInsight(repo);
-                const normalizedPillars = collectStrategicPillars(
-                  repo,
-                  repo.insights,
-                  workspaceKnowledgeEntries
-                );
-                const topics = (repo.metadata?.topics as string[] | undefined) ?? [];
-                const repoDescription = asString(repo.metadata?.description);
-                return (
-                  <li key={repo.id} className="rounded-2xl border border-slate-200 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                            <p className="text-base font-semibold text-slate-900">{repo.repo_full_name}</p>
-                            <p className="text-xs text-slate-500">Last synced: {formatDate(repo.last_synced)}</p>
-                          </div>
-                          <button
-                            onClick={() => handleSyncRepo(repo.repo_full_name)}
-                            disabled={syncingRepo === repo.repo_full_name}
-                            className="rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-                          >
-                            {syncingRepo === repo.repo_full_name ? "Syncing..." : "Sync Now"}
-                          </button>
-                        </div>
-                        <div className="mt-3 space-y-3 text-sm text-slate-600">
-                          {repoDescription && <p>{repoDescription}</p>}
-                          {topics.length > 0 && (
-                            <p className="text-xs uppercase tracking-wide text-slate-400">
-                              Topics: {topics.join(", ")}
-                            </p>
-                          )}
-                          <p className="text-xs text-slate-400">
-                            Context entries: {repo.contexts.length} · Insights generated: {repo.insights.length}
-                          </p>
-                          {normalizedPillars.length > 0 && (
-                            <div className="rounded-2xl bg-slate-100 p-3">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Latest Strategic Pillars</p>
-                              <ul className="mt-2 list-disc space-y-2 pl-4 text-xs text-slate-600">
-                                {normalizedPillars.map((pillar, index) => (
-                                  <li key={`${insight?.id ?? repo.id}-pillar-${index}`}>
-                                    <span className="font-medium text-slate-700">{pillar.title}</span>
-                                    {pillar.summary && <p className="mt-1 text-xs text-slate-500">{pillar.summary}</p>}
-                                    {!pillar.summary && pillar.valueAdd && (
-                                      <p className="mt-1 text-xs text-slate-500">Value Add: {pillar.valueAdd}</p>
-                                    )}
-                                    {!pillar.summary && !pillar.valueAdd && pillar.problem && (
-                                      <p className="mt-1 text-xs text-slate-500">Problem: {pillar.problem}</p>
-                                    )}
-                                    {pillar.apiEndpoints.length > 0 && (
-                                      <p className="mt-1 text-xs text-slate-500">
-                                        API Endpoints: {pillar.apiEndpoints.slice(0, 2).join(", ")}
-                                        {pillar.apiEndpoints.length > 2 ? "…" : ""}
-                                      </p>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Available Repositories</h3>
-                <button
-                  onClick={handleLoadRepos}
-                  disabled={loadingRepos}
-                  className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60"
-                >
-                  {loadingRepos ? "Loading..." : "Load from GitHub"}
-                </button>
-              </div>
-              {availableRepos.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">
-                  Fetch repositories to sync a project. Make sure your GitHub OAuth scopes include repository access.
-                </p>
-              ) : (
-                <ul className="mt-4 space-y-3 text-sm text-slate-600">
-                  {availableRepos.map((repo) => {
-                    const fullName = (repo.full_name as string) ?? "";
-                    const description = asString(repo.description);
-                    return (
-                      <li key={fullName} className="rounded-2xl border border-slate-200 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-base font-semibold text-slate-900">{fullName}</p>
-                            {description && <p className="text-xs text-slate-500">{description}</p>}
-                          </div>
-                          <button
-                            onClick={() => handleSyncRepo(fullName)}
-                            disabled={syncingRepo === fullName}
-                            className="rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-                          >
-                            {syncingRepo === fullName ? "Syncing..." : "Sync"}
-                          </button>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
             </div>
           </div>
         </section>
 
-        {connectedRepos.length > 0 && (
-          <section className="mt-10 space-y-6">
-            <h3 className="text-xl font-semibold text-slate-900">AI-Generated Insights</h3>
-            {connectedRepos.map((repo) => {
-              const insight = latestInsight(repo);
-              const normalizedPillars = collectStrategicPillars(
-                repo,
-                repo.insights,
-                workspaceKnowledgeEntries
-              );
-              const roadmap = insight?.roadmap as Record<string, unknown> | undefined;
-              const prds = (insight?.prd_drafts as Array<Record<string, unknown>> | undefined) ?? [];
-              return (
-                <div key={`${repo.id}-insights`} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div>
-                      <p className="text-lg font-semibold text-slate-900">{repo.repo_full_name}</p>
-                      <p className="text-xs text-slate-500">Insights generated {formatDate(insight?.created_at)}</p>
-                    </div>
-                    <a
-                      href={repo.repo_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-700"
-                    >
-                      View on GitHub ↗
-                    </a>
-                  </div>
-
-                  <div className="mt-5 grid gap-5 md:grid-cols-3">
-                    <div className="rounded-2xl border border-slate-200 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Strategic Pillars</p>
-                      {normalizedPillars.length > 0 ? (
-                        <div className="mt-3 space-y-3 text-sm text-slate-600">
-                          {normalizedPillars.map((pillar, index) => {
-                            const listSections = [
-                              { title: "API Endpoints", items: pillar.apiEndpoints },
-                              { title: "Next Steps", items: pillar.nextSteps },
-                              { title: "Supporting Assets", items: pillar.supportingAssets },
-                              { title: "Implementation Notes", items: pillar.implementationNotes },
-                            ];
-                            return (
-                              <div key={`${repo.id}-pillar-full-${index}`} className="rounded-xl bg-slate-100 p-3">
-                                <p className="text-sm font-semibold text-slate-800">{pillar.title}</p>
-                                {pillar.summary && <p className="mt-1 text-xs text-slate-500">{pillar.summary}</p>}
-                                {pillar.problem && <p className="mt-1 text-xs text-slate-500">Problem: {pillar.problem}</p>}
-                                {pillar.valueAdd && <p className="mt-1 text-xs text-slate-500">Value Add: {pillar.valueAdd}</p>}
-                                {listSections.map(
-                                  (section) =>
-                                    section.items.length > 0 && (
-                                      <div key={section.title} className="mt-2">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                          {section.title}
-                                        </p>
-                                        <ul className="mt-1 list-disc pl-4 text-xs text-slate-600">
-                                          {section.items.map((item, itemIdx) => (
-                                            <li key={`${repo.id}-pillar-${index}-${section.title}-${itemIdx}`}>{item}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                    )
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-slate-500">Sync the repository to generate pillars.</p>
-                      )}
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">AI Roadmap</p>
-                      {roadmap ? (
-                        <div className="mt-3 space-y-3 text-sm text-slate-600">
-                          {["phase_1", "phase_2", "phase_3"].map((key) => {
-                            const phase = roadmap[key] as Record<string, unknown> | undefined;
-                            if (!phase) return null;
-                            const initiatives = asStringArray(phase.key_initiatives);
-                            const phaseName =
-                              asString(phase.name) ?? key.replace("_", " ").toUpperCase();
-                            const phaseGoal = asString(phase.goal);
-                            return (
-                              <div key={`${repo.id}-${key}`} className="rounded-xl bg-slate-100 p-3">
-                                <p className="text-sm font-semibold text-slate-800">{phaseName}</p>
-                                {phaseGoal && <p className="text-xs text-slate-500">Goal: {phaseGoal}</p>}
-                                {initiatives.length > 0 && (
-                                  <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-600">
-                                    {initiatives.map((item, index) => (
-                                      <li key={`${repo.id}-${key}-${index}`}>{item}</li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-slate-500">No roadmap yet. Trigger a sync to generate one.</p>
-                      )}
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">PRD Drafts</p>
-                      {prds.length > 0 ? (
-                        <div className="mt-3 space-y-3 text-sm text-slate-600">
-                          {prds.slice(0, 3).map((prd, index) => {
-                            const draftName = asString(prd.name) ?? `Draft ${index + 1}`;
-                            const draftProblem = asString(prd.problem);
-                            const draftSolution = asString(prd.solution_outline);
-                            return (
-                              <div key={`${repo.id}-prd-${index}`} className="rounded-xl bg-slate-100 p-3">
-                                <p className="text-sm font-semibold text-slate-800">{draftName}</p>
-                                {draftProblem && (
-                                  <p className="text-xs text-slate-500">Problem: {draftProblem}</p>
-                                )}
-                                {draftSolution && (
-                                  <p className="text-xs text-slate-500">Solution: {draftSolution}</p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-slate-500">AI PRD drafts will appear after the next sync.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {repo.contexts.length > 0 && (
-                    <div className="mt-6">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Context Snapshots</p>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {repo.contexts.slice(0, 4).map((ctx) => (
-                          <div key={ctx.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{ctx.file_path}</p>
-                            <p className="mt-2 whitespace-pre-wrap text-xs text-slate-600">{ctx.content_summary}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+        <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <article className="rounded-[14px] border border-black/10 bg-white p-6">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#00c950] to-[#009966] text-white">
+                  <IconBrain />
                 </div>
-              );
-            })}
-          </section>
-        )}
-
-        {Object.keys(knowledgeGroups).length > 0 && (
-          <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-xl font-semibold text-slate-900">Workspace Knowledge Entries</h3>
-            <p className="mt-2 text-sm text-slate-500">
-              These entries are added to your knowledge base for retrieval when generating PRDs, roadmaps, or other AI outputs.
-            </p>
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              {Object.entries(knowledgeGroups).map(([type, entries]) => (
-                <div key={type} className="rounded-2xl border border-slate-200 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{type.replace("_", " ")}</p>
-                  <ul className="mt-3 space-y-2 text-xs text-slate-600">
-                    {entries.slice(0, 4).map((entry) => (
-                      <li key={entry.id} className="rounded-xl bg-slate-100 p-3">
-                        <p className="text-sm font-semibold text-slate-800">{entry.title}</p>
-                        <p className="mt-1 text-xs text-slate-500">{formatDate(entry.created_at)}</p>
-                        <p className="mt-2 text-xs text-slate-600">{entry.content}</p>
-                      </li>
-                    ))}
-                  </ul>
+                <div>
+                  <p className="text-[18px] font-semibold leading-[28px] text-[#101828]">OpenAI</p>
+                  <p className="mt-1 text-[14px] text-[#6a7282]">GPT Models</p>
                 </div>
-              ))}
+              </div>
+              {connected ? (
+                <div className="inline-flex h-6 items-center gap-2 rounded-full bg-[#f0fdf4] px-3 text-[12px] font-medium text-[#008236]">
+                  <IconCheck />
+                  Connected
+                </div>
+              ) : (
+                <div className="inline-flex h-6 items-center rounded-full bg-[#f3f4f6] px-3 text-[12px] font-medium text-[#4a5565]">Not Connected</div>
+              )}
             </div>
-          </section>
-        )}
+
+            <p className="mt-4 text-[14px] leading-6 text-[#4a5565]">
+              Connect your OpenAI API key to use GPT-4, GPT-3.5, and other models for PRD generation, roadmap planning, and AI agent
+              capabilities.
+            </p>
+
+            {connected ? (
+              <>
+                <div className="mt-6 rounded-[10px] border border-[#e5e7eb] bg-[#f9fafb] px-3 py-3">
+                  <p className="text-[12px] text-[#6a7282]">API Key</p>
+                  <p className="mt-1 text-[14px] text-[#101828]">{maskedKey}</p>
+                </div>
+                <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-8 items-center justify-center gap-2 rounded-[8px] border border-black/10 bg-white px-3 text-[14px] text-[#0a0a0a] disabled:opacity-60"
+                    onClick={handleTestSavedConnection}
+                    disabled={testing || removing || loading}
+                  >
+                    <IconCheck />
+                    {testing ? "Testing..." : "Test Connection"}
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-8 items-center justify-center rounded-[8px] border border-black/10 bg-white px-3 text-[14px] text-[#0a0a0a]"
+                    onClick={openConfigModal}
+                    disabled={removing}
+                  >
+                    Update Key
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-8 w-10 items-center justify-center rounded-[8px] border border-black/10 bg-white text-[#dc2626] disabled:opacity-60"
+                    onClick={handleRemoveIntegration}
+                    disabled={removing || testing}
+                    title="Remove OpenAI integration"
+                  >
+                    <IconTrash />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="mt-6 flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-[14px] font-medium text-white disabled:opacity-60"
+                onClick={openConfigModal}
+                disabled={loading}
+              >
+                <IconKey />
+                {loading ? "Loading..." : "Configure Integration"}
+              </button>
+            )}
+
+            <div className="mt-6 border-t border-[#e5e7eb] pt-4">
+              <a
+                href="https://platform.openai.com/api-keys"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-[14px] text-[#9810fa]"
+              >
+                Get your OpenAI API key
+                <IconLinkOut />
+              </a>
+            </div>
+          </article>
+
+          <IntegrationComingSoon
+            title="Anthropic Claude"
+            subtitle="Claude AI Models"
+            description="Connect Claude AI for advanced reasoning and analysis capabilities across your product management workflows."
+            gradient="from-[#2b7fff] to-[#155dfc]"
+          />
+          <IntegrationComingSoon
+            title="Google Gemini"
+            subtitle="Gemini AI Models"
+            description="Integrate Google's Gemini models for multimodal AI capabilities and enhanced product insights."
+            gradient="from-[#ff6900] to-[#e7000b]"
+          />
+          <IntegrationComingSoon
+            title="Custom Models"
+            subtitle="Your Own API"
+            description="Connect your self-hosted or custom AI models via API endpoints for complete control over your AI infrastructure."
+            gradient="from-[#615fff] to-[#9810fa]"
+          />
+        </section>
+
+        <section className="mt-6 rounded-[14px] border border-[#bedbff] bg-[#eff6ff] p-6">
+          <h3 className="text-[28px] font-semibold text-[#101828]">Need Help?</h3>
+          <p className="mt-2 text-[14px] leading-6 text-[#364153]">
+            Learn more about configuring integrations, managing API keys, and best practices for using your own AI models.
+          </p>
+          <a
+            href="https://platform.openai.com/docs"
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] border border-black/10 bg-white px-4 text-[14px] font-medium text-[#0a0a0a]"
+          >
+            <IconDoc />
+            View Documentation
+          </a>
+        </section>
       </main>
-      </div>
+
+      {isConfigOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-[512px] overflow-hidden rounded-[14px] border border-black/10 bg-white shadow-[0px_25px_50px_rgba(0,0,0,0.25)]">
+            <div className="border-b border-[#e5e7eb] px-6 py-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#00c950] to-[#009966] text-white">
+                    <IconKey />
+                  </div>
+                  <div>
+                    <p className="text-[20px] font-bold text-[#101828]">Configure OpenAI</p>
+                    <p className="text-[14px] text-[#6a7282]">Enter your OpenAI API key</p>
+                  </div>
+                </div>
+                <button type="button" className="text-[#94a3b8]" onClick={closeConfigModal}>
+                  <IconClose />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <label className="text-[14px] font-medium text-[#364153]" htmlFor="openai-api-key">
+                  OpenAI API Key *
+                </label>
+                <div className="mt-2 relative">
+                  <input
+                    id="openai-api-key"
+                    type={showApiKey ? "text" : "password"}
+                    className="h-9 w-full rounded-[8px] border border-transparent bg-[#f3f3f5] pl-3 pr-10 text-[14px] text-[#101828] placeholder:text-[#717182]"
+                    placeholder="sk-..."
+                    value={draftApiKey}
+                    onChange={(event) => setDraftApiKey(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-3 top-2 text-[#94a3b8]"
+                    onClick={() => setShowApiKey((prev) => !prev)}
+                    title={showApiKey ? "Hide API key" : "Show API key"}
+                  >
+                    {showApiKey ? <IconEyeOff /> : <IconEye />}
+                  </button>
+                </div>
+                <p className="mt-2 text-[12px] text-[#6a7282]">Your API key starts with "sk-" and can be found in your OpenAI dashboard</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <input
+                  className="h-9 rounded-[8px] border border-[#d1d5db] bg-white px-3 text-[13px] text-[#101828]"
+                  placeholder="Organization (optional)"
+                  value={draftOrganization}
+                  onChange={(event) => setDraftOrganization(event.target.value)}
+                />
+                <input
+                  className="h-9 rounded-[8px] border border-[#d1d5db] bg-white px-3 text-[13px] text-[#101828]"
+                  placeholder="Project (optional)"
+                  value={draftProject}
+                  onChange={(event) => setDraftProject(event.target.value)}
+                />
+              </div>
+
+              <div className="rounded-[10px] border border-[#fee685] bg-[#fffbeb] p-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 text-[#f68a0a]">
+                    <IconWarning />
+                  </div>
+                  <div>
+                    <p className="text-[14px] font-medium text-[#7b3306]">Security Notice</p>
+                    <p className="mt-1 text-[12px] leading-5 text-[#973c00]">
+                      Your API key is encrypted and stored securely. It is only used for AI requests configured for your workspace.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-[10px] border border-[#bedbff] bg-[#eff6ff] p-4 text-[12px] leading-5 text-[#1c398e]">
+                <span className="font-bold">Don&apos;t have an API key?</span> Visit <span className="text-[#155dfc]">platform.openai.com/api-keys</span> to
+                create one. You&apos;ll need an OpenAI account and billing set up.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 border-t border-[#e5e7eb] bg-[#f9fafb] px-6 py-5">
+              <button
+                type="button"
+                className="h-9 flex-1 rounded-[8px] border border-black/10 bg-white text-[14px] font-medium text-[#0a0a0a]"
+                onClick={closeConfigModal}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="h-9 flex-1 rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-[14px] font-medium text-white disabled:opacity-50"
+                onClick={handleSaveConfiguration}
+                disabled={!draftApiKey.trim() || saving}
+              >
+                {saving ? "Saving..." : "Save Configuration"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed right-6 top-6 z-50">
+          <div
+            className={`flex items-center gap-2 rounded-[8px] border px-4 py-3 text-[13px] font-medium shadow-[0px_4px_12px_rgba(0,0,0,0.1)] ${
+              toast.tone === "success"
+                ? "border-[#ededed] bg-white text-[#171717]"
+                : "border-[#fecaca] bg-white text-[#b91c1c]"
+            }`}
+          >
+            <span className={toast.tone === "success" ? "text-[#171717]" : "text-[#b91c1c]"}>
+              {toast.tone === "success" ? <IconCheck /> : <IconClose />}
+            </span>
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function IntegrationComingSoon({
+  title,
+  subtitle,
+  description,
+  gradient,
+}: {
+  title: string;
+  subtitle: string;
+  description: string;
+  gradient: string;
+}) {
+  return (
+    <article className="rounded-[14px] border border-black/10 bg-white p-6 opacity-60">
+      <div className="mb-4 flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`flex h-12 w-12 items-center justify-center rounded-[10px] bg-gradient-to-br ${gradient} text-white`}>
+            <IconBrain />
+          </div>
+          <div>
+            <p className="text-[18px] font-semibold leading-[28px] text-[#101828]">{title}</p>
+            <p className="mt-1 text-[14px] text-[#6a7282]">{subtitle}</p>
+          </div>
+        </div>
+        <span className="rounded-full bg-[#f3f4f6] px-3 py-1 text-[12px] font-medium text-[#4a5565]">Coming Soon</span>
+      </div>
+      <p className="text-[14px] leading-6 text-[#4a5565]">{description}</p>
+    </article>
   );
 }

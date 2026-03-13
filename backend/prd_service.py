@@ -15,11 +15,12 @@ from backend.knowledge_base_service import EMBED_TEXT_LIMIT
 PRD_EMBED_CHUNK_SIZE = 1200
 
 
-def next_prd_version(db: Session, project_id: UUID | str, workspace_id: UUID | None) -> int:
-    query = (
-        db.query(func.max(models.PRD.version))
-        .filter(models.PRD.project_id == project_id)
-    )
+def next_prd_version(db: Session, project_id: UUID | str | None, workspace_id: UUID | None) -> int:
+    query = db.query(func.max(models.PRD.version))
+    if project_id is None:
+        query = query.filter(models.PRD.project_id.is_(None))
+    else:
+        query = query.filter(models.PRD.project_id == project_id)
     if workspace_id:
         query = query.filter(models.PRD.workspace_id == workspace_id)
     value = query.scalar()
@@ -50,7 +51,7 @@ def _chunk_markdown(content: str | None, chunk_size: int = PRD_EMBED_CHUNK_SIZE)
 
 
 def refresh_prd_embeddings(db: Session, prd: models.PRD) -> None:
-    if not prd.workspace_id:
+    if not prd.workspace_id or not prd.project_id:
         return
     db.query(models.PRDEmbedding).filter(models.PRDEmbedding.prd_id == prd.id).delete()
     chunks = _chunk_markdown(prd.content)

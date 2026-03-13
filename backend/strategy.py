@@ -100,6 +100,7 @@ def _pull_project_context(db: Session, project: models.Project) -> dict[str, Any
             "title": project.title,
             "goals": project.goals,
             "north_star_metric": project.north_star_metric,
+            "website_url": project.website_url,
         },
         "prds": [
             {
@@ -135,6 +136,13 @@ def _pull_project_context(db: Session, project: models.Project) -> dict[str, Any
 
 
 def _build_strategy_prompt(metrics: dict[str, Any], context: dict[str, Any]) -> str:
+    product_principles = (
+        "Ground your answer in core product management principles before reacting to the provided context: "
+        "1) clarify product mission, user value, and measurable outcomes, "
+        "2) translate those into 3-4 strategic pillars that balance discovery vs. delivery, "
+        "3) call out execution health, risks, and next actions, "
+        "4) ensure every insight ties back to goals, personas, or roadmap checkpoints even if data is sparse."
+    )
     return (
         "You are the AI Product Strategist (AI CPO) for this project. Analyze the provided context and respond with JSON"
         ' matching {"summary":{"narrative":"","focus_areas":[],"forecast":"","health_score":0.0},'
@@ -144,9 +152,127 @@ def _build_strategy_prompt(metrics: dict[str, Any], context: dict[str, Any]) -> 
         '"insights":[{"title":"","description":"","severity":"info|warning|risk",'
         '"source_type":"prd|roadmap|task","source_id":"","suggested_action":"","impact_score":0.0}]}.'
         "Focus on clustering PRDs, roadmaps, and tasks into strategic pillars, highlight overlaps, and forecast outcomes."
+        f"\n{product_principles}"
         f"\nWorkspace metrics: {json.dumps(metrics, default=str)}"
         f"\nProject context: {json.dumps(context, default=str)}"
     )
+
+
+def _fallback_strategy_from_context(context: dict[str, Any]) -> dict[str, Any]:
+    project = context.get("project") or {}
+    prds = context.get("prds") or []
+    tasks = context.get("tasks") or []
+    roadmaps = context.get("roadmaps") or []
+
+    total_tasks = len(tasks)
+    completed_tasks = sum(
+        1
+        for task in tasks
+        if (task.get("status") or "").lower() in {"done", "completed", "closed", "shipped"}
+    )
+    task_progress = (completed_tasks / total_tasks * 100) if total_tasks else 15.0
+
+    summary_narrative = (
+        f"Grounded in core product management principles, {project.get('title') or 'this project'} currently has "
+        f"{len(prds)} PRDs, {len(roadmaps)} roadmap entries, and {total_tasks} tracked tasks. "
+        "Reaffirm user value, measurable outcomes, and execution plans before scaling delivery."
+    )
+    focus_areas = [
+        "Re-state mission, personas, and success metrics to keep discovery aligned",
+        "Align product definition with roadmap checkpoints",
+        "Tighten execution metrics based on active tasks",
+        "Capture insights from recent documents for next planning cycle",
+    ]
+    forecast = (
+        "Based on the current artifact mix, expect gradual progress once PRDs are finalized "
+        "and roadmap milestones gain owners. Revisit targets every sprint."
+    )
+
+    pillars: list[dict[str, Any]] = []
+    if prds:
+        pillars.append(
+            {
+                "title": "Product Definition",
+                "description": "Ensure requirement docs stay current and cover upcoming launches.",
+                "progress_percent": min(100.0, 30.0 + len(prds) * 5.0),
+                "related_prds": [{"id": prd["id"], "title": prd.get("title") or prd.get("feature_name") or "PRD"} for prd in prds[:5]],
+                "related_roadmaps": [],
+                "related_tasks": [],
+            }
+        )
+    if roadmaps:
+        pillars.append(
+            {
+                "title": "Strategic Roadmap",
+                "description": "Track roadmap checkpoints to keep delivery predictable.",
+                "progress_percent": min(100.0, 25.0 + len(roadmaps) * 10.0),
+                "related_prds": [],
+                "related_roadmaps": [{"id": item["id"], "title": item.get("title") or "Roadmap"} for item in roadmaps[:5]],
+                "related_tasks": [],
+            }
+        )
+    pillars.append(
+        {
+            "title": "Execution",
+            "description": "Close out tasks to convert plans into shipped outcomes.",
+            "progress_percent": round(task_progress, 2),
+            "related_prds": [],
+            "related_roadmaps": [],
+            "related_tasks": [
+                {"id": task["id"], "title": task.get("title") or "Task", "status": task.get("status") or "unknown"}
+                for task in tasks[:5]
+            ],
+        }
+    )
+
+    insights: list[dict[str, Any]] = []
+    if not prds:
+        insights.append(
+            {
+                "title": "Publish a flagship PRD",
+                "description": "Create at least one detailed requirements doc so execution teams can align.",
+                "severity": "warning",
+                "source_type": "project",
+                "source_id": project.get("id"),
+                "suggested_action": "Draft a PRD outlining goals, personas, and north-star metrics.",
+                "impact_score": 0.6,
+            }
+        )
+    if total_tasks and completed_tasks / total_tasks < 0.5:
+        insights.append(
+            {
+                "title": "Resolve open execution items",
+                "description": f"Only {completed_tasks}/{total_tasks} tracked tasks are done.",
+                "severity": "risk",
+                "source_type": "task",
+                "source_id": None,
+                "suggested_action": "Prioritize blockers and reassign owners for overdue items.",
+                "impact_score": 0.7,
+            }
+        )
+    if not insights:
+        insights.append(
+            {
+                "title": "Reaffirm mission and roadmap linkage",
+                "description": "Keep validating priorities weekly so discovery, delivery, and goals stay connected.",
+                "severity": "info",
+                "source_type": "project",
+                "source_id": project.get("id"),
+                "suggested_action": "Review roadmap, personas, and metrics together during planning.",
+                "impact_score": 0.4,
+            }
+        )
+
+    return {
+        "summary": {
+            "narrative": summary_narrative,
+            "focus_areas": focus_areas,
+            "forecast": forecast,
+            "health_score": max(0.35, min(0.9, task_progress / 100)),
+        },
+        "pillars": pillars,
+        "insights": insights,
+    }
 
 
 def _store_strategy(db: Session, workspace_id: UUID, project_id: UUID, payload: dict[str, Any]) -> tuple[list[models.StrategicPillar], list[models.StrategicInsight], models.StrategicSnapshot]:
@@ -285,32 +411,7 @@ def _generate_strategy(db: Session, workspace_id: UUID, project_id: UUID, user_i
         content = completion.choices[0].message.content or "{}"
         data = json.loads(content)
     except Exception:
-        data = {
-            "summary": {
-                "narrative": "Strategic data unavailable.",
-                "focus_areas": [],
-                "forecast": "",
-                "health_score": 0.5,
-            },
-            "pillars": [
-                {
-                    "title": "Execution",
-                    "description": "Default strategic pillar.",
-                    "progress_percent": 0.0,
-                    "related_prds": [],
-                    "related_roadmaps": [],
-                    "related_tasks": [],
-                }
-            ],
-            "insights": [
-                {
-                    "title": "Monitor roadmap",
-                    "description": "Unable to generate insights; verify AI credentials.",
-                    "severity": "info",
-                    "suggested_action": "Regenerate once AI access is available.",
-                }
-            ],
-        }
+        data = _fallback_strategy_from_context(context)
 
     pillars, insights, snapshot = _store_strategy(db, workspace_id, project_id, data)
     return _build_overview_response(pillars, insights, snapshot)

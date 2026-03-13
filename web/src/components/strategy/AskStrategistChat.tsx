@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { askStrategist } from "../../api";
 import AgentAvatar from "../AgentAvatar";
+import TypingIndicator from "../TypingIndicator";
 import useAgentName from "../../hooks/useAgentName";
 
 interface AskStrategistChatProps {
@@ -44,6 +45,11 @@ export default function AskStrategistChat({ workspaceId, projectId, userId }: As
         </div>
         <AgentAvatar name={agentName} size="sm" />
       </div>
+      {loading && (
+        <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <TypingIndicator label={agentName} />
+        </div>
+      )}
       {answer && <p className="mt-4 text-sm text-slate-600">{answer}</p>}
       {error && <p className="mt-2 text-xs text-rose-500">{error}</p>}
       <form onSubmit={handleAsk} className="mt-4 flex flex-col gap-3">

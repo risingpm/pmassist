@@ -7,7 +7,13 @@ from functools import lru_cache
 from typing import Any
 from uuid import UUID
 
-from cryptography.fernet import Fernet, InvalidToken  # type: ignore
+try:
+    from cryptography.fernet import Fernet, InvalidToken  # type: ignore
+    _CRYPTO_IMPORT_ERROR: Exception | None = None
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency warning
+    Fernet = None  # type: ignore[assignment]
+    InvalidToken = Exception  # type: ignore[assignment]
+    _CRYPTO_IMPORT_ERROR = exc
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
@@ -25,7 +31,17 @@ if _env_org:
 # so we ignore OPENAI_PROJECT for now to avoid runtime errors.
 
 
+def _ensure_crypto() -> None:
+    if Fernet is None:
+        message = (
+            "The 'cryptography' package is required to encrypt AI credentials. "
+            "Install it via `pip install cryptography`."
+        )
+        raise RuntimeError(message) from _CRYPTO_IMPORT_ERROR
+
+
 def _get_cipher() -> Fernet:
+    _ensure_crypto()
     secret = os.getenv("AI_CREDENTIALS_SECRET") or os.getenv("APP_SECRET_KEY") or DEFAULT_DEV_CREDENTIAL_SECRET
     key = hashlib.sha256(secret.encode("utf-8")).digest()
     token = base64.urlsafe_b64encode(key)

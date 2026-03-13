@@ -71,6 +71,7 @@ def _process_chat_turn(
         user_id=payload.user_id,
         workspace_id=payload.workspace_id,
         template_id=payload.template_id,
+        context_tag=payload.context_tag,
     )
     response = roadmap_ai.generate_roadmap_endpoint(str(payload.project_id), request_payload, db=db)
 
@@ -114,6 +115,68 @@ def _process_chat_turn(
     return response_payload
 
 
+def _process_workspace_chat_turn(
+    db: Session,
+    payload: schemas.RoadmapWorkspaceChatTurnRequest,
+    chat: models.RoadmapChat | None,
+) -> schemas.RoadmapChatResponse:
+    prompt = _require_prompt(payload.prompt)
+    if chat is None:
+        chat = models.RoadmapChat(
+            workspace_id=payload.workspace_id,
+            project_id=None,
+            user_id=payload.user_id,
+            messages=[],
+        )
+        db.add(chat)
+        db.flush()
+    existing_history = _deserialize_messages(chat.messages)
+
+    request_payload = schemas.RoadmapGenerateRequest(
+        prompt=prompt,
+        conversation_history=existing_history,
+        user_id=payload.user_id,
+        workspace_id=payload.workspace_id,
+        template_id=payload.template_id,
+        context_tag=payload.context_tag,
+    )
+    response = roadmap_ai.generate_workspace_roadmap(request_payload, db=db)
+
+    updated_messages = existing_history + [
+        schemas.RoadmapChatMessage(role="user", content=prompt),
+        schemas.RoadmapChatMessage(role="assistant", content=response.message),
+    ]
+    chat.messages = [message.model_dump() for message in updated_messages]
+    chat.workspace_id = payload.workspace_id
+    chat.project_id = None
+    db.add(chat)
+    db.commit()
+    db.refresh(chat)
+
+    record = _serialize_chat(chat)
+    response_payload = schemas.RoadmapChatResponse(
+        **record.model_dump(),
+        assistant_message=response.message,
+        roadmap=response.roadmap,
+        context_entries=response.context_entries,
+        action=response.action,
+        suggestions=response.suggestions,
+        kb_entry_id=response.kb_entry_id or chat.output_entry_id,
+        verification=response.verification,
+    )
+    if response.roadmap:
+        remember_workspace_event(
+            db,
+            payload.workspace_id,
+            content=f"Roadmap assistant update:\n{response.roadmap}",
+            source="roadmap_chat",
+            metadata={"chat_id": str(chat.id)},
+            tags=["roadmap", "assistant"],
+            user_id=payload.user_id,
+        )
+    return response_payload
+
+
 @router.post("/roadmap", response_model=schemas.RoadmapChatResponse)
 def create_or_continue_chat(
     payload: schemas.RoadmapChatTurnRequest,
@@ -150,6 +213,30 @@ def create_or_continue_chat(
     return _process_chat_turn(db, payload, chat)
 
 
+@router.post("/roadmap/workspace", response_model=schemas.RoadmapChatResponse)
+def create_or_continue_workspace_chat(
+    payload: schemas.RoadmapWorkspaceChatTurnRequest,
+    db: Session = Depends(get_db),
+):
+    ensure_membership(db, payload.workspace_id, payload.user_id, required_role="editor")
+    chat: models.RoadmapChat | None = None
+    if payload.chat_id:
+        chat = (
+            db.query(models.RoadmapChat)
+            .filter(
+                models.RoadmapChat.id == payload.chat_id,
+                models.RoadmapChat.workspace_id == payload.workspace_id,
+            )
+            .first()
+        )
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat session not found.")
+        if chat.project_id is not None:
+            raise HTTPException(status_code=400, detail="Chat session belongs to a project.")
+
+    return _process_workspace_chat_turn(db, payload, chat)
+
+
 @router.put("/roadmap/{chat_id}", response_model=schemas.RoadmapChatResponse)
 def refine_chat(
     chat_id: UUID,
@@ -171,3 +258,24 @@ def get_chat(chat_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Dep
     if not chat:
         raise HTTPException(status_code=404, detail="Chat session not found.")
     return _serialize_chat(chat)
+
+
+@router.get("/roadmap/project/{project_id}", response_model=list[schemas.RoadmapChatRecord])
+def list_project_chats(
+    project_id: UUID,
+    workspace_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+):
+    ensure_project_access(db, workspace_id, project_id, user_id, required_role="viewer")
+    chats = (
+        db.query(models.RoadmapChat)
+        .filter(
+            models.RoadmapChat.workspace_id == workspace_id,
+            models.RoadmapChat.project_id == project_id,
+        )
+        .order_by(models.RoadmapChat.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [_serialize_chat(chat) for chat in chats]

@@ -18,11 +18,13 @@ def _serialize_task(task: models.Task) -> schemas.TaskResponse:
         id=task.id,
         workspace_id=task.workspace_id,
         project_id=task.project_id,
+        task_board_id=task.task_board_id,
         epic_id=task.epic_id,
         title=task.title,
         description=task.description,
         status=task.status,
         priority=task.priority,
+        position=task.position,
         assignee_id=task.assignee_id,
         due_date=task.due_date,
         roadmap_id=task.roadmap_id,
@@ -64,15 +66,25 @@ def create_task(
         )
         if not project or project.workspace_id != workspace_id:
             raise HTTPException(status_code=404, detail="Project not found in this workspace.")
+    if payload.task_board_id:
+        board = (
+            db.query(models.TaskBoard)
+            .filter(models.TaskBoard.id == payload.task_board_id)
+            .first()
+        )
+        if not board or board.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Task board not found in this workspace.")
 
     task = models.Task(
         workspace_id=workspace_id,
         project_id=payload.project_id,
+        task_board_id=payload.task_board_id,
         epic_id=payload.epic_id,
         title=payload.title.strip(),
         description=payload.description,
         status=payload.status,
         priority=payload.priority,
+        position=payload.position or 0,
         assignee_id=payload.assignee_id,
         due_date=payload.due_date,
         roadmap_id=payload.roadmap_id,
@@ -118,6 +130,15 @@ def update_task(
     task = _get_task(db, task_id)
     if task.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Task not found in this workspace.")
+
+    if payload.task_board_id:
+        board = (
+            db.query(models.TaskBoard)
+            .filter(models.TaskBoard.id == payload.task_board_id)
+            .first()
+        )
+        if not board or board.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Task board not found in this workspace.")
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(task, field, value)

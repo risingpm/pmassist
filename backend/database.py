@@ -1,12 +1,22 @@
 import os
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
 
-# Load environment variables from .env file
-load_dotenv()
+def _load_env():
+    project_root = Path(__file__).resolve().parents[1]
+    env_path = project_root / ".env"
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=False)
+    else:  # pragma: no cover - defensive
+        load_dotenv()
+
+
+_load_env()
 
 # Read DATABASE_URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")

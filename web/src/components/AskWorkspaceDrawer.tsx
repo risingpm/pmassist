@@ -8,6 +8,7 @@ import {
   type WorkspaceChatTurn,
 } from "../api";
 import AgentAvatar from "./AgentAvatar";
+import TypingIndicator from "./TypingIndicator";
 
 type AskWorkspaceDrawerProps = {
   workspaceId: string | null;
@@ -141,6 +142,14 @@ export default function AskWorkspaceDrawer({
                     <p className="rounded-2xl bg-slate-50 px-4 py-2 text-sm text-slate-700">{message.content}</p>
                   </div>
                 ))}
+                {sending && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-500">{title}</p>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-2 text-sm text-slate-700">
+                      <TypingIndicator text="Thinking" />
+                    </div>
+                  </div>
+                )}
               </div>
               {verification && (
                 <div

@@ -65,16 +65,31 @@ def _entry_text_source(entry: models.KnowledgeBaseEntry, text_override: str | No
     return entry.title or ""
 
 
-def get_kb_context_entries(db: Session, workspace_id: UUID, limit: int = 5) -> list[models.KnowledgeBaseEntry]:
+def get_kb_context_entries(
+    db: Session,
+    workspace_id: UUID,
+    *,
+    limit: int = 5,
+    project_id: UUID | None = None,
+) -> list[models.KnowledgeBaseEntry]:
     kb = ensure_workspace_kb(db, workspace_id)
-    # Prioritize document/repo entries, then others by recency
-    entries = (
-        db.query(models.KnowledgeBaseEntry)
-        .filter(models.KnowledgeBaseEntry.kb_id == kb.id)
-        .order_by(models.KnowledgeBaseEntry.type.in_(["document", "repo"]).desc(), models.KnowledgeBaseEntry.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    # Prioritize project-specific entries, then document/repo entries, then others by recency
+    project_priority = None
+    if project_id:
+        project_priority = sa.case((models.KnowledgeBaseEntry.project_id == project_id, 1), else_=0)
+    query = db.query(models.KnowledgeBaseEntry).filter(models.KnowledgeBaseEntry.kb_id == kb.id)
+    if project_priority is not None:
+        query = query.order_by(
+            project_priority.desc(),
+            models.KnowledgeBaseEntry.type.in_(["document", "repo"]).desc(),
+            models.KnowledgeBaseEntry.created_at.desc(),
+        )
+    else:
+        query = query.order_by(
+            models.KnowledgeBaseEntry.type.in_(["document", "repo"]).desc(),
+            models.KnowledgeBaseEntry.created_at.desc(),
+        )
+    entries = query.limit(limit).all()
     return entries
 
 
@@ -99,30 +114,48 @@ def update_entry_embedding(
     db.add(entry)
 
 
-def get_relevant_entries(db: Session, workspace_id: UUID, query: str, top_n: int = 5) -> list[models.KnowledgeBaseEntry]:
+def get_relevant_entries(
+    db: Session,
+    workspace_id: UUID,
+    query: str,
+    top_n: int = 5,
+    *,
+    project_id: UUID | None = None,
+) -> list[models.KnowledgeBaseEntry]:
     kb = ensure_workspace_kb(db, workspace_id)
     normalized_query = (query or "").strip()
     if not normalized_query:
-        return get_kb_context_entries(db, workspace_id, limit=top_n)
+        return get_kb_context_entries(db, workspace_id, limit=top_n, project_id=project_id)
 
     try:
         query_embedding = generate_embedding(normalized_query[:EMBED_TEXT_LIMIT], db=db, workspace_id=workspace_id)
     except Exception as exc:  # pragma: no cover - relies on OpenAI
         logger.warning("Falling back to recency context for workspace %s: %s", workspace_id, exc)
-        return get_kb_context_entries(db, workspace_id, limit=top_n)
+        return get_kb_context_entries(db, workspace_id, limit=top_n, project_id=project_id)
 
     vector_literal = "[" + ",".join(f"{value:.10f}" for value in query_embedding) + "]"
-    rows = db.execute(
-        sa.text(
-            "SELECT id FROM kb_entries "
-            "WHERE kb_id = :kb_id AND embedding IS NOT NULL "
-            "ORDER BY embedding <-> (:embedding)::vector LIMIT :limit"
-        ),
-        {"kb_id": str(kb.id), "embedding": vector_literal, "limit": top_n},
-    ).fetchall()
+    if project_id:
+        rows = db.execute(
+            sa.text(
+                "SELECT id FROM kb_entries "
+                "WHERE kb_id = :kb_id AND embedding IS NOT NULL "
+                "ORDER BY (project_id = :project_id) DESC, embedding <-> (:embedding)::vector "
+                "LIMIT :limit"
+            ),
+            {"kb_id": str(kb.id), "project_id": str(project_id), "embedding": vector_literal, "limit": top_n},
+        ).fetchall()
+    else:
+        rows = db.execute(
+            sa.text(
+                "SELECT id FROM kb_entries "
+                "WHERE kb_id = :kb_id AND embedding IS NOT NULL "
+                "ORDER BY embedding <-> (:embedding)::vector LIMIT :limit"
+            ),
+            {"kb_id": str(kb.id), "embedding": vector_literal, "limit": top_n},
+        ).fetchall()
 
     if not rows:
-        return get_kb_context_entries(db, workspace_id, limit=top_n)
+        return get_kb_context_entries(db, workspace_id, limit=top_n, project_id=project_id)
 
     entry_ids = [row[0] for row in rows]
     entries = (
@@ -136,7 +169,7 @@ def get_relevant_entries(db: Session, workspace_id: UUID, query: str, top_n: int
 
     if len(ordered) < top_n:
         seen = {entry.id for entry in ordered}
-        fallback = get_kb_context_entries(db, workspace_id, limit=top_n)
+        fallback = get_kb_context_entries(db, workspace_id, limit=top_n, project_id=project_id)
         for entry in fallback:
             if entry.id not in seen:
                 ordered.append(entry)

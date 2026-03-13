@@ -5,26 +5,39 @@ type ChatInputProps = {
   disabled?: boolean;
   placeholder?: string;
   suggestions?: string[];
+  suggestionsInline?: boolean;
+  value?: string;
+  onValueChange?: (next: string) => void;
 };
 
-export default function ChatInput({ onSend, disabled = false, placeholder, suggestions = [] }: ChatInputProps) {
-  const [value, setValue] = useState("");
+export default function ChatInput({
+  onSend,
+  disabled = false,
+  placeholder,
+  suggestions = [],
+  suggestionsInline = true,
+  value,
+  onValueChange,
+}: ChatInputProps) {
+  const [internalValue, setInternalValue] = useState("");
+  const inputValue = value ?? internalValue;
+  const setInputValue = onValueChange ?? setInternalValue;
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!value.trim() || disabled) return;
-    onSend(value.trim());
-    setValue("");
+    if (!inputValue.trim() || disabled) return;
+    onSend(inputValue.trim());
+    setInputValue("");
   };
 
   const handleSuggestion = (text: string) => {
     if (disabled) return;
-    setValue(text);
+    setInputValue(text);
   };
 
   return (
     <div className="border-t border-white/10 bg-gradient-to-b from-transparent via-white/5 to-white/10 px-4 py-6">
-      {suggestions.length > 0 && (
+      {suggestionsInline && suggestions.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2">
           {suggestions.slice(0, 4).map((suggestion) => (
             <button
@@ -43,8 +56,8 @@ export default function ChatInput({ onSend, disabled = false, placeholder, sugge
         className="group rounded-[36px] border border-white/15 bg-white/90 p-5 shadow-[0_30px_60px_rgba(15,23,42,0.35)] backdrop-blur transition focus-within:border-indigo-200 focus-within:shadow-indigo-500/30"
       >
         <textarea
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
+          value={inputValue}
+          onChange={(event) => setInputValue(event.target.value)}
           placeholder={placeholder || "Describe the roadmap you need help with..."}
           rows={4}
           disabled={disabled}
@@ -55,7 +68,7 @@ export default function ChatInput({ onSend, disabled = false, placeholder, sugge
           <div className="flex flex-1 items-center justify-end gap-3">
             <button
               type="submit"
-              disabled={disabled || !value.trim()}
+              disabled={disabled || !inputValue.trim()}
               className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500 px-6 py-2 text-sm font-semibold text-white shadow-lg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Send

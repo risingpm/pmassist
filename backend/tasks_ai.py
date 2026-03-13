@@ -98,6 +98,7 @@ Focus on actionable engineering work and respect dependencies if mentioned. Do n
 
 Project: {project.title}
 Goals: {project.goals}
+Website or Key URL: {project.website_url or 'Not provided'}
 Source document:
 {source_text}
 
