@@ -1,18 +1,16 @@
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import logoIcon from "../assets/dashboard/logo-icon.svg";
 import navDashboard from "../assets/dashboard/nav-dashboard.svg";
+import productBotChat from "../assets/dashboard/productbot-chat.svg";
 import navProjects from "../assets/dashboard/nav-projects.svg";
 import navPrds from "../assets/dashboard/nav-prds.svg";
 import navRoadmaps from "../assets/dashboard/nav-roadmaps.svg";
 import navTasks from "../assets/dashboard/nav-tasks.svg";
 import navAgents from "../assets/dashboard/nav-agents.svg";
 import navIntegrations from "../assets/dashboard/nav-integrations.svg";
-import productBotIcon from "../assets/dashboard/productbot-icon.svg";
-import productBotChat from "../assets/dashboard/productbot-chat.svg";
 import userMenu from "../assets/dashboard/user-menu.svg";
-import searchIcon from "../assets/dashboard/search-icon.svg";
-import bellIcon from "../assets/dashboard/bell-icon.svg";
 import welcomeIcon from "../assets/dashboard/welcome-icon.svg";
 import cardPrd from "../assets/dashboard/card-prd.svg";
 import cardRoadmap from "../assets/dashboard/card-roadmap.svg";
@@ -21,8 +19,26 @@ import cardAgent from "../assets/dashboard/card-agent.svg";
 import infoBot from "../assets/dashboard/info-bot.svg";
 import infoProjects from "../assets/dashboard/info-projects.svg";
 import helpIcon from "../assets/dashboard/help-icon.svg";
+import { logout } from "../api";
+import { AUTH_USER_KEY } from "../constants";
+
+function HomeChatIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 20 20" fill="none">
+      <rect x="3" y="3" width="14" height="12" rx="3" stroke="currentColor" strokeWidth="1.6" />
+      <path d="m7 17 2.5-2h4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 const START_CARDS = [
+  {
+    title: "Chat with AI",
+    description: "Talk to AI about your projects",
+    icon: productBotChat,
+    gradient: "linear-gradient(135deg, rgba(173, 70, 255, 1) 0%, rgba(152, 16, 250, 1) 100%)",
+    action: "ai-chat",
+  },
   {
     title: "New PRD",
     description: "Create a product requirements document",
@@ -55,6 +71,7 @@ const START_CARDS = [
 
 const NAV_ITEMS = [
   { label: "Dashboard", icon: navDashboard, active: true },
+  { label: "AI Chat", icon: productBotChat, route: "ai-chat" },
   { label: "Projects", icon: navProjects, route: "projects" },
   { label: "PRDs", icon: navPrds, route: "prds" },
   { label: "Roadmaps", icon: navRoadmaps, route: "roadmaps" },
@@ -66,6 +83,34 @@ const NAV_ITEMS = [
 export default function WorkspaceLanding() {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const profile = useMemo(() => {
+    if (typeof window === "undefined") {
+      return { name: "User", subtitle: "Workspace member", initials: "U" };
+    }
+    const raw = window.sessionStorage.getItem(AUTH_USER_KEY);
+    let displayName = "";
+    let email = "";
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { display_name?: string | null; email?: string | null };
+        displayName = (parsed.display_name || "").trim();
+        email = (parsed.email || "").trim();
+      } catch {
+        // ignore malformed session payload
+      }
+    }
+    const fallbackName = email ? email.split("@")[0] : "User";
+    const resolvedName = displayName || fallbackName;
+    const label = resolvedName
+      .split(/[\s._-]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((chunk) => chunk[0]?.toUpperCase() || "")
+      .join("") || "U";
+    const subtitle = email || "Workspace member";
+    return { name: resolvedName, subtitle, initials: label };
+  }, []);
 
   const handleStartCardClick = (action?: string) => {
     if (!workspaceId) return;
@@ -83,12 +128,28 @@ export default function WorkspaceLanding() {
     }
     if (action === "agents") {
       navigate(`/workspaces/${workspaceId}/agents`);
+      return;
+    }
+    if (action === "ai-chat") {
+      navigate(`/workspaces/${workspaceId}/ai-chat`);
     }
   };
 
   const handleNavClick = (route?: string) => {
     if (!workspaceId || !route) return;
     navigate(`/workspaces/${workspaceId}/${route}`);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // best effort logout
+    }
+    if (typeof window !== "undefined") {
+      window.sessionStorage.clear();
+    }
+    navigate("/signin", { replace: true });
   };
 
   return (
@@ -130,40 +191,6 @@ export default function WorkspaceLanding() {
             </nav>
           </div>
 
-          <div className="mt-6 border-t border-[#e5e7eb] px-4 pt-4">
-            <div
-              className="rounded-[10px] px-4 py-4 text-white"
-              style={{
-                backgroundImage:
-                  "linear-gradient(146.42868003355775deg, rgba(173, 70, 255, 1) 0%, rgba(43, 127, 255, 1) 100%)",
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <img alt="" className="h-5 w-5" src={productBotIcon} />
-                <span className="text-[16px] font-semibold tracking-[-0.3125px]">ProductBot</span>
-              </div>
-              <p className="mt-2 text-[14px] leading-[20px] text-[#f3e8ff]">
-                Your AI assistant is ready to help
-              </p>
-              <button className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-white text-[14px] font-medium text-[#8200db]">
-                <img alt="" className="h-4 w-4" src={productBotChat} />
-                Chat Now
-              </button>
-            </div>
-          </div>
-
-          <div className="border-t border-[#e5e7eb] px-4 py-4">
-            <div className="flex items-center gap-3 rounded-[10px] px-2 py-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#9810fa] text-[16px] font-medium text-white">
-                AM
-              </div>
-              <div>
-                <p className="text-[14px] font-medium text-[#101828]">Alex Morgan</p>
-                <p className="text-[12px] text-[#6a7282]">Product Manager</p>
-              </div>
-              <img alt="" className="ml-auto h-4 w-4" src={userMenu} />
-            </div>
-          </div>
         </aside>
 
         <main className="flex-1">
@@ -173,20 +200,36 @@ export default function WorkspaceLanding() {
                 <h1 className="text-[24px] font-bold tracking-[0.0703px] text-[#101828]">
                   Product Workspace
                 </h1>
-                <p className="text-[14px] text-[#6a7282]">Welcome back, Alex!</p>
+                <p className="text-[14px] text-[#6a7282]">Welcome back, {profile.name}!</p>
               </div>
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <input
-                    className="h-9 w-64 rounded-[8px] bg-[#f3f3f5] pl-10 pr-3 text-[14px] text-[#101828] placeholder:text-[#717182]"
-                    placeholder="Search..."
-                  />
-                  <img alt="" className="absolute left-3 top-2.5 h-4 w-4" src={searchIcon} />
+              <div className="flex items-center gap-3">
+                <div
+                  className="relative"
+                  onMouseEnter={() => setShowAccountMenu(true)}
+                  onMouseLeave={() => setShowAccountMenu(false)}
+                >
+                <div className="flex items-center gap-3 rounded-[10px] border border-[#e5e7eb] px-3 py-1.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#9810fa] text-[13px] font-medium text-white">
+                    {profile.initials}
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-medium leading-[16px] text-[#101828]">{profile.name}</p>
+                    <p className="text-[11px] leading-[14px] text-[#6a7282]">{profile.subtitle}</p>
+                  </div>
+                  <img alt="" className="h-4 w-4" src={userMenu} />
                 </div>
-                <button className="relative flex h-9 w-9 items-center justify-center rounded-[10px]">
-                  <img alt="" className="h-5 w-5" src={bellIcon} />
-                  <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#fb2c36]" />
-                </button>
+                  {showAccountMenu ? (
+                    <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[180px] rounded-[10px] border border-[#e5e7eb] bg-white p-2 shadow-lg">
+                      <button
+                        type="button"
+                        onClick={() => void handleLogout()}
+                        className="w-full rounded-[8px] px-3 py-2 text-left text-[14px] font-medium text-[#ef4444] hover:bg-[#fff1f2]"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
         </header>
@@ -227,7 +270,13 @@ export default function WorkspaceLanding() {
                       className="flex h-10 w-10 items-center justify-center rounded-[10px]"
                       style={{ backgroundImage: card.gradient }}
                     >
-                      <img alt="" className="h-5 w-5" src={card.icon} />
+                      {card.action === "ai-chat" ? (
+                        <span className="text-white">
+                          <HomeChatIcon className="h-5 w-5" />
+                        </span>
+                      ) : (
+                        <img alt="" className="h-5 w-5" src={card.icon} />
+                      )}
                     </div>
                     <p className="mt-3 text-[16px] font-semibold tracking-[-0.3125px] text-[#101828]">
                       {card.title}

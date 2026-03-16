@@ -265,6 +265,58 @@ def _chat_response(session: models.WorkspaceAIChat, context_entries: list[schema
     )
 
 
+def _session_summary(session: models.WorkspaceAIChat) -> schemas.WorkspaceChatSessionSummary:
+    messages = _serialize_chat_messages(session.messages or [])
+    preview = session.title or "Workspace chat"
+    if messages:
+        for msg in reversed(messages):
+            if msg.role == "user" and msg.content.strip():
+                preview = msg.content.strip()
+                break
+        if len(preview) > 64:
+            preview = preview[:61].rstrip() + "..."
+    return schemas.WorkspaceChatSessionSummary(
+        session_id=session.id,
+        title=session.title or "Workspace chat",
+        preview=preview,
+        message_count=len(messages),
+        updated_at=session.last_message_at or session.created_at,
+    )
+
+
+@router.get("/sessions", response_model=list[schemas.WorkspaceChatSessionSummary])
+def list_workspace_sessions(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    sessions = (
+        db.query(models.WorkspaceAIChat)
+        .filter(
+            models.WorkspaceAIChat.workspace_id == workspace_id,
+            models.WorkspaceAIChat.user_id == user_id,
+        )
+        .order_by(models.WorkspaceAIChat.last_message_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [_session_summary(session) for session in sessions]
+
+
+@router.get("/sessions/{session_id}", response_model=schemas.WorkspaceChatTurnResponse)
+def get_workspace_session(session_id: UUID, workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    session = (
+        db.query(models.WorkspaceAIChat)
+        .filter(
+            models.WorkspaceAIChat.id == session_id,
+            models.WorkspaceAIChat.workspace_id == workspace_id,
+            models.WorkspaceAIChat.user_id == user_id,
+        )
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+    return _chat_response(session, [])
+
+
 @router.post("/ask", response_model=schemas.WorkspaceChatTurnResponse)
 def ask_workspace(payload: schemas.WorkspaceChatTurnRequest, db: Session = Depends(get_db)):
     ensure_membership(db, payload.workspace_id, payload.user_id, required_role="viewer")

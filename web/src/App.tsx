@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import OnboardingPage from "./pages/Onboarding";
 import ProjectsPage from "./pages/ProjectsPage";
@@ -30,6 +30,7 @@ import UsagePage from "./pages/UsagePage";
 import IntegrationsPage from "./pages/Integrations";
 import TaskBoardBuilder from "./pages/TaskBoardBuilder";
 import TaskBoardsPage from "./pages/TaskBoardsPage";
+import AIChatPage from "./pages/AIChatPage";
 
 function RootRoute() {
   const navigate = useNavigate();
@@ -92,6 +93,29 @@ function WorkspaceRouteRedirect({ segment }: { segment: string }) {
 }
 
 export default function App() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = location.pathname;
+    const page =
+      path === "/" ? "Home" :
+      path.startsWith("/signin") ? "Sign In" :
+      path.startsWith("/forgot-password") ? "Forgot Password" :
+      path.startsWith("/reset-password") ? "Reset Password" :
+      path.startsWith("/onboarding") ? "Onboarding" :
+      path.includes("/home") ? "Workspace" :
+      path.includes("/projects") ? "Projects" :
+      path.includes("/prds") || path.includes("/prd/") ? "PRDs" :
+      path.includes("/roadmaps") ? "Roadmaps" :
+      path.includes("/tasks") ? "Task Boards" :
+      path.includes("/ai-chat") ? "AI Chat" :
+      path.includes("/integrations") ? "Integrations" :
+      path.includes("/agents") ? "AI Agents" :
+      path.includes("/usage") ? "Usage" :
+      "Workspace";
+    document.title = `${page} | 8product.ai`;
+  }, [location.pathname]);
+
   return (
     <RoleProvider>
       <Routes>
@@ -135,6 +159,7 @@ export default function App() {
           <Route path="billing" element={<BillingPage />} />
           <Route path="usage" element={<UsagePage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
+          <Route path="ai-chat" element={<AIChatPage />} />
           <Route path="tasks" element={<TaskBoardsPage />} />
           <Route path="tasks/new" element={<TaskBoardBuilder />} />
         </Route>

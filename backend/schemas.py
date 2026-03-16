@@ -880,6 +880,7 @@ class AuthLogin(BaseModel):
 class AuthResponse(BaseModel):
     id: UUID
     email: EmailStr
+    display_name: str | None = None
     workspace_id: UUID | None = None
     workspace_name: str | None = None
     workspace_role: WorkspaceRoleLiteral | None = None
@@ -1194,6 +1195,14 @@ class WorkspaceChatTurnResponse(BaseModel):
     context_entries: list["KnowledgeBaseContextItem"] = Field(default_factory=list)
     updated_at: datetime
     verification: VerificationDetails | None = None
+
+
+class WorkspaceChatSessionSummary(BaseModel):
+    session_id: UUID
+    title: str
+    preview: str
+    message_count: int
+    updated_at: datetime
 
 
 # ---------------------------------------------------------

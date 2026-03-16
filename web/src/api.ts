@@ -88,6 +88,7 @@ export type GoogleAuthPayload = {
 export type AuthResponse = {
   id: string;
   email: string;
+  display_name?: string | null;
   workspace_id?: string | null;
   workspace_name?: string | null;
   workspace_role?: WorkspaceRole | null;
@@ -1161,6 +1162,14 @@ export type WorkspaceChatTurn = {
   context_entries: KnowledgeBaseContextItem[];
   updated_at: string;
   verification?: VerificationDetails | null;
+};
+
+export type WorkspaceChatSessionSummary = {
+  session_id: string;
+  title: string;
+  preview: string;
+  message_count: number;
+  updated_at: string;
 };
 
 export async function startGitHubAuth(workspaceId: string, userId: string, redirectOverride?: string) {
@@ -3273,6 +3282,33 @@ export async function askWorkspaceQuestion(payload: {
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to ask workspace assistant");
+  }
+  return res.json();
+}
+
+export async function listWorkspaceChatSessions(
+  workspaceId: string,
+  userId: string
+): Promise<WorkspaceChatSessionSummary[]> {
+  const query = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
+  const res = await fetch(`${API_BASE}/workspace-ai/sessions?${query.toString()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load chat history");
+  }
+  return res.json();
+}
+
+export async function getWorkspaceChatSession(
+  sessionId: string,
+  workspaceId: string,
+  userId: string
+): Promise<WorkspaceChatTurn> {
+  const query = new URLSearchParams({ workspace_id: workspaceId, user_id: userId });
+  const res = await fetch(`${API_BASE}/workspace-ai/sessions/${sessionId}?${query.toString()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load chat session");
   }
   return res.json();
 }

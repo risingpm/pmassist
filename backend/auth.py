@@ -147,6 +147,7 @@ def _auth_response_for_user(db: Session, user: models.User, workspace_hint: mode
     return schemas.AuthResponse(
         id=user.id,
         email=user.email,
+        display_name=user.display_name,
         workspace_id=workspace_id,
         workspace_name=workspace_name,
         workspace_role=role,

@@ -1,15 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { Navigate, Outlet, useParams } from "react-router-dom";
 
-import { USER_ID_KEY, WORKSPACE_ID_KEY } from "../constants";
-import AICoachButton from "../components/AICoachButton";
+import { WORKSPACE_ID_KEY } from "../constants";
 
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const userId = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    return window.sessionStorage.getItem(USER_ID_KEY);
-  }, []);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -27,7 +22,6 @@ export default function WorkspaceLayout() {
       <div className="min-h-screen">
         <Outlet />
       </div>
-      <AICoachButton workspaceId={workspaceId} userId={userId} />
     </div>
   );
 }

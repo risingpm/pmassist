@@ -26,10 +26,12 @@ type TaskItem = {
 type ChatMsg = { role: "assistant" | "user"; content: string };
 
 type UiColumn = {
-  id: "backlog" | "todo" | "in_progress" | "done";
+  id: string;
   title: string;
   dot: string;
   tasks: TaskItem[];
+  status?: TaskStatus;
+  removable?: boolean;
 };
 
 type ManualTaskForm = {
@@ -74,11 +76,13 @@ function IconClose() {
 }
 
 const EMPTY_COLUMNS: UiColumn[] = [
-  { id: "backlog", title: "Backlog", dot: "bg-[#99a1af]", tasks: [] },
-  { id: "todo", title: "Todo", dot: "bg-[#3b82f6]", tasks: [] },
-  { id: "in_progress", title: "In Progress", dot: "bg-[#f0b100]", tasks: [] },
-  { id: "done", title: "Done", dot: "bg-[#00c950]", tasks: [] },
+  { id: "backlog", title: "Backlog", dot: "#99a1af", tasks: [], status: "todo", removable: false },
+  { id: "todo", title: "Todo", dot: "#2b7fff", tasks: [], status: "todo", removable: false },
+  { id: "in_progress", title: "In Progress", dot: "#f0b100", tasks: [], status: "in_progress", removable: false },
+  { id: "done", title: "Done", dot: "#00c950", tasks: [], status: "done", removable: false },
 ];
+
+const COLUMN_COLOR_OPTIONS = ["#ad46ff", "#2b7fff", "#00c950", "#f0b100", "#fb2c36", "#f6339a", "#615fff", "#ff6900"];
 
 function normalizePriority(value: string | undefined): "high" | "medium" {
   return value === "high" || value === "critical" ? "high" : "medium";
@@ -110,7 +114,10 @@ export default function TaskBoardBuilder() {
   const [draftTasks, setDraftTasks] = useState<Array<{ title: string; description: string; priority: TaskPriority; status: TaskStatus }>>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
-  const [taskModalColumn, setTaskModalColumn] = useState<UiColumn["id"]>("todo");
+  const [taskModalColumn, setTaskModalColumn] = useState<string>("todo");
+  const [addColumnModalOpen, setAddColumnModalOpen] = useState(false);
+  const [newColumnName, setNewColumnName] = useState("");
+  const [newColumnColor, setNewColumnColor] = useState("#ad46ff");
   const [manualTask, setManualTask] = useState<ManualTaskForm>({
     title: "",
     description: "",
@@ -165,10 +172,10 @@ export default function TaskBoardBuilder() {
     }));
 
     setColumns([
-      { id: "backlog", title: "Backlog", dot: "bg-[#99a1af]", tasks: [] },
-      { id: "todo", title: "Todo", dot: "bg-[#3b82f6]", tasks: todoTasks },
-      { id: "in_progress", title: "In Progress", dot: "bg-[#f0b100]", tasks: inProgressTasks },
-      { id: "done", title: "Done", dot: "bg-[#00c950]", tasks: doneTasks },
+      { id: "backlog", title: "Backlog", dot: "#99a1af", tasks: [], status: "todo", removable: false },
+      { id: "todo", title: "Todo", dot: "#2b7fff", tasks: todoTasks, status: "todo", removable: false },
+      { id: "in_progress", title: "In Progress", dot: "#f0b100", tasks: inProgressTasks, status: "in_progress", removable: false },
+      { id: "done", title: "Done", dot: "#00c950", tasks: doneTasks, status: "done", removable: false },
     ]);
   };
 
@@ -237,10 +244,10 @@ export default function TaskBoardBuilder() {
       const done = mapped.filter((_, idx) => (generated.tasks[idx].status || "todo") === "done");
 
       setColumns([
-        { id: "backlog", title: "Backlog", dot: "bg-[#99a1af]", tasks: [] },
-        { id: "todo", title: "Todo", dot: "bg-[#3b82f6]", tasks: todo },
-        { id: "in_progress", title: "In Progress", dot: "bg-[#f0b100]", tasks: inProgress },
-        { id: "done", title: "Done", dot: "bg-[#00c950]", tasks: done },
+        { id: "backlog", title: "Backlog", dot: "#99a1af", tasks: [], status: "todo", removable: false },
+        { id: "todo", title: "Todo", dot: "#2b7fff", tasks: todo, status: "todo", removable: false },
+        { id: "in_progress", title: "In Progress", dot: "#f0b100", tasks: inProgress, status: "in_progress", removable: false },
+        { id: "done", title: "Done", dot: "#00c950", tasks: done, status: "done", removable: false },
       ]);
 
       setDraftTasks(
@@ -294,7 +301,7 @@ export default function TaskBoardBuilder() {
     }
   };
 
-  const openManualTaskModal = (columnId: UiColumn["id"]) => {
+  const openManualTaskModal = (columnId: string) => {
     setTaskModalColumn(columnId);
     setManualTask({
       title: "",
@@ -325,7 +332,8 @@ export default function TaskBoardBuilder() {
     const title = manualTask.title.trim();
     if (!title) return;
 
-    const statusForDraft: TaskStatus = taskModalColumn === "backlog" ? "todo" : taskModalColumn;
+    const targetColumn = columns.find((column) => column.id === taskModalColumn);
+    const statusForDraft: TaskStatus = targetColumn?.status || "todo";
     const task: TaskItem = {
       id: `manual-${Date.now()}`,
       title,
@@ -354,6 +362,41 @@ export default function TaskBoardBuilder() {
 
     setTaskModalOpen(false);
     setToast("Task added to draft board.");
+  };
+
+  const openAddColumnModal = () => {
+    setNewColumnName("");
+    setNewColumnColor("#ad46ff");
+    setAddColumnModalOpen(true);
+  };
+
+  const closeAddColumnModal = () => {
+    setAddColumnModalOpen(false);
+  };
+
+  const handleAddColumn = () => {
+    const title = newColumnName.trim();
+    if (!title) return;
+    const baseId = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "custom-column";
+    let nextId = baseId;
+    let suffix = 1;
+    while (columns.some((column) => column.id === nextId)) {
+      suffix += 1;
+      nextId = `${baseId}-${suffix}`;
+    }
+    setColumns((prev) => [
+      ...prev,
+      {
+        id: nextId,
+        title,
+        dot: newColumnColor,
+        tasks: [],
+        status: "todo",
+        removable: true,
+      },
+    ]);
+    setAddColumnModalOpen(false);
+    setToast("Column added.");
   };
 
   const canSend = useMemo(() => Boolean(message.trim()) && !sending, [message, sending]);
@@ -431,8 +474,8 @@ export default function TaskBoardBuilder() {
           </div>
         </aside>
 
-        <section className="flex-1">
-          <header className="border-b border-[#e5e7eb] bg-white px-6 py-6">
+        <section className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-10 border-b border-[#e5e7eb] bg-white px-6 py-6">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <input
@@ -456,24 +499,38 @@ export default function TaskBoardBuilder() {
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <button type="button" className="h-8 rounded-[8px] border border-black/10 bg-white px-3 text-[14px] text-[#0a0a0a]">Search</button>
-              <button type="button" className="h-8 rounded-[8px] border border-black/10 bg-white px-3 text-[14px] text-[#0a0a0a]">Filter</button>
               <div className="flex-1" />
-              <button type="button" className="h-8 rounded-[8px] border border-black/10 bg-white px-3 text-[14px] text-[#0a0a0a]">+ Add Column</button>
+              <button
+                type="button"
+                className="h-8 rounded-[8px] border border-black/10 bg-white px-3 text-[14px] text-[#0a0a0a]"
+                onClick={openAddColumnModal}
+              >
+                + Add Column
+              </button>
             </div>
           </header>
 
-          <div className="overflow-x-auto p-6">
-            <div className="flex min-w-[980px] gap-4">
+          <div className="flex-1 overflow-auto p-6">
+            <div className="flex min-w-full w-max gap-4">
               {columns.map((column) => (
-                <div key={column.id} className="w-80 shrink-0">
+                <div key={column.id} className="w-[320px] shrink-0">
                   <div className="mb-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${column.dot}`} />
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: column.dot }} />
                       <h3 className="text-[18px] font-semibold text-[#101828]">{column.title}</h3>
                       <span className="rounded-full bg-[#f3f4f6] px-2 py-0.5 text-[12px] text-[#6a7282]">{column.tasks.length}</span>
                     </div>
-                    <button type="button" className="text-[#9ca3af]">×</button>
+                    <button
+                      type="button"
+                      className="text-[#9ca3af] disabled:opacity-40"
+                      disabled={!column.removable}
+                      onClick={() => {
+                        if (!column.removable) return;
+                        setColumns((prev) => prev.filter((candidate) => candidate.id !== column.id));
+                      }}
+                    >
+                      ×
+                    </button>
                   </div>
                   <div className="rounded-[10px] bg-[#f9fafb] p-3">
                     <div className="space-y-2">
@@ -636,6 +693,68 @@ export default function TaskBoardBuilder() {
                 disabled={!manualTask.title.trim()}
               >
                 Create Task
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {addColumnModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-[448px] overflow-hidden rounded-[14px] border border-black/10 bg-white shadow-[0px_25px_50px_0px_rgba(0,0,0,0.25)]">
+            <div className="flex items-center justify-between border-b border-[#e5e7eb] px-6 py-5">
+              <h3 className="text-[20px] font-bold tracking-[-0.45px] text-[#101828]">Add Column</h3>
+              <button type="button" className="text-[#9ca3af] hover:text-[#6a7282]" onClick={closeAddColumnModal}>
+                <IconClose />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-6 py-6">
+              <label className="block">
+                <span className="text-[14px] font-medium text-[#364153]">Column Name *</span>
+                <input
+                  value={newColumnName}
+                  onChange={(event) => setNewColumnName(event.target.value)}
+                  placeholder="e.g., Review, Testing..."
+                  className="mt-2 h-9 w-full rounded-[8px] bg-[#f3f3f5] px-3 text-[14px] text-[#101828] placeholder:text-[#717182]"
+                />
+              </label>
+
+              <div>
+                <span className="text-[14px] font-medium text-[#364153]">Color</span>
+                <div className="mt-2 grid grid-cols-4 gap-2">
+                  {COLUMN_COLOR_OPTIONS.map((color) => {
+                    const active = color === newColumnColor;
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        className={`rounded-[10px] border-2 p-[10px] ${active ? "border-[#9810fa]" : "border-[#e5e7eb]"}`}
+                        onClick={() => setNewColumnColor(color)}
+                      >
+                        <span className="block h-6 w-full rounded-[4px]" style={{ backgroundColor: color }} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 border-t border-[#e5e7eb] bg-[#f9fafb] px-6 py-6">
+              <button
+                type="button"
+                className="h-9 flex-1 rounded-[8px] border border-black/10 bg-white text-[14px] font-medium text-[#0a0a0a]"
+                onClick={closeAddColumnModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="h-9 flex-1 rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-[14px] font-medium text-white disabled:opacity-50"
+                onClick={handleAddColumn}
+                disabled={!newColumnName.trim()}
+              >
+                Add Column
               </button>
             </div>
           </div>
