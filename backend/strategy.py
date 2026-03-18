@@ -401,7 +401,7 @@ def _generate_strategy(db: Session, workspace_id: UUID, project_id: UUID, user_i
     try:
         client = get_openai_client(db, workspace_id)
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.2,
             messages=[
                 {"role": "system", "content": "You are an AI CPO. Respond only with valid JSON."},
@@ -484,7 +484,7 @@ def ask_project_strategist(
     try:
         client = get_openai_client(db, payload.workspace_id)
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.3,
             messages=[
                 {"role": "system", "content": "You respond as an executive strategist."},

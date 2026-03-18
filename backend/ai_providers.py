@@ -18,6 +18,7 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from backend import models
+from backend.token_metering import record_openai_usage
 
 DEFAULT_DEV_CREDENTIAL_SECRET = "pmassist-dev-secret"
 DEFAULT_OPENAI_KWARGS: dict[str, Any] = {}
@@ -113,6 +114,82 @@ def test_openai_credentials(api_key: str, *, organization: str | None = None, pr
         kwargs["organization"] = organization.strip()
     client = OpenAI(**kwargs)
     client.models.list()
+
+
+def metered_chat_completion(
+    db: Session,
+    *,
+    workspace_id: UUID,
+    user_id: UUID | None,
+    feature: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+    response_format: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    **extra: Any,
+):
+    client = get_openai_client(db, workspace_id)
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+    }
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if timeout is not None:
+        payload["timeout"] = timeout
+    if response_format is not None:
+        payload["response_format"] = response_format
+    payload.update(extra)
+
+    response = client.chat.completions.create(**payload)
+    try:
+        record_openai_usage(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            feature=feature,
+            model=model,
+            usage=getattr(response, "usage", None),
+            request_id=getattr(response, "id", None),
+            metadata=metadata,
+        )
+    except Exception:
+        # Metering should never fail user-facing generation.
+        pass
+    return response
+
+
+def metered_embedding_create(
+    db: Session,
+    *,
+    workspace_id: UUID,
+    user_id: UUID | None,
+    feature: str,
+    model: str,
+    input_text: str,
+    metadata: dict[str, Any] | None = None,
+):
+    client = get_openai_client(db, workspace_id)
+    response = client.embeddings.create(model=model, input=input_text)
+    try:
+        record_openai_usage(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            feature=feature,
+            model=model,
+            usage=getattr(response, "usage", None),
+            request_id=None,
+            metadata=metadata,
+        )
+    except Exception:
+        pass
+    return response
 
 
 def upsert_workspace_openai_credentials(

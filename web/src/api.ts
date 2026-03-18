@@ -92,6 +92,7 @@ export type AuthResponse = {
   workspace_id?: string | null;
   workspace_name?: string | null;
   workspace_role?: WorkspaceRole | null;
+  is_new_user?: boolean;
 };
 
 export type AuthInitializeResponse = {
@@ -311,6 +312,89 @@ export async function addUsageCredits(
     throw new Error(text || "Unable to add credits.");
   }
   return (await res.json()) as UsageDashboardResponse;
+}
+
+export type UsageAccountResponse = {
+  workspace_id: string;
+  user_id?: string | null;
+  workspace_allocated_tokens: number;
+  workspace_consumed_tokens: number;
+  workspace_remaining_tokens: number;
+  user_allocated_tokens?: number | null;
+  user_consumed_tokens?: number | null;
+  user_remaining_tokens?: number | null;
+};
+
+export type UsageEventResponse = {
+  id: string;
+  workspace_id: string;
+  user_id?: string | null;
+  feature: string;
+  provider: string;
+  model?: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  deducted_tokens: number;
+  cost_units: number;
+  request_id?: string | null;
+  created_at: string;
+};
+
+export async function getUsageAccount(
+  workspaceId: string,
+  userId?: string | null
+): Promise<UsageAccountResponse> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const url = workspaceUrl(`${API_BASE}/usage/account`, workspaceId, userId);
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to load usage account.");
+  }
+  return (await res.json()) as UsageAccountResponse;
+}
+
+export async function getUsageEvents(
+  workspaceId: string,
+  limit = 20,
+  userId?: string | null
+): Promise<UsageEventResponse[]> {
+  if (!workspaceId) throw new Error("Workspace context missing");
+  const url = workspaceUrl(`${API_BASE}/usage/events`, workspaceId, userId, { limit: String(limit) });
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to load usage events.");
+  }
+  return (await res.json()) as UsageEventResponse[];
+}
+
+export async function simulateUsageTokens(payload: {
+  workspaceId: string;
+  totalTokens: number;
+  feature?: string;
+  model?: string;
+  userId?: string | null;
+}): Promise<UsageAccountResponse> {
+  const res = await fetch(`${API_BASE}/usage/simulate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      workspace_id: payload.workspaceId,
+      user_id: payload.userId || resolveUserId(payload.userId),
+      total_tokens: payload.totalTokens,
+      feature: payload.feature ?? "usage.simulated",
+      model: payload.model ?? "simulated-model",
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Unable to simulate usage.");
+  }
+  return (await res.json()) as UsageAccountResponse;
 }
 
 export type BillingPlan = "trial" | "pro" | "team";
@@ -2129,7 +2213,10 @@ export async function createPrd(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error("Failed to create PRD");
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to create PRD");
+  }
   return res.json();
 }
 
@@ -2142,7 +2229,10 @@ export async function createWorkspacePrd(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error("Failed to create PRD");
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to create PRD");
+  }
   return res.json();
 }
 
@@ -2248,7 +2338,10 @@ export async function refinePrd(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instructions, template_id: templateId ?? null })
   });
-  if (!res.ok) throw new Error("Failed to refine PRD");
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to refine PRD");
+  }
   return res.json();
 }
 
@@ -2263,7 +2356,10 @@ export async function refineWorkspacePrd(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instructions, template_id: templateId ?? null }),
   });
-  if (!res.ok) throw new Error("Failed to refine PRD");
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || "Failed to refine PRD");
+  }
   return res.json();
 }
 

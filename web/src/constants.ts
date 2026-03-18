@@ -11,5 +11,6 @@ export const DEMO_PROJECT_ID_KEY = "pmassist:demo-project-id";
 export const SELECTED_PRD_TEMPLATE_KEY = "pmassist:selected-prd-template";
 export const ONBOARDING_COMPLETE_KEY = "pmassist:onboarding-complete";
 export const AI_COACH_OPEN_EVENT = "pmassist:open-ai-coach";
+export const SHOW_SUBSCRIPTION_MODAL_KEY = "pmassist:show-subscription-modal";
 export const WIDE_PAGE_CONTAINER =
   "mx-auto w-full px-4 sm:px-6 lg:px-8 xl:px-10 max-w-[1400px] 2xl:max-w-[1600px]";

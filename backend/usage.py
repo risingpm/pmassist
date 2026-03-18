@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend import models
 from backend.database import get_db
 from backend.models import Workspace, WorkspaceUsageStats, User
 from backend.rbac import ensure_membership
+from backend.token_metering import ensure_user_token_account, ensure_workspace_token_account, top_up_tokens
 
 router = APIRouter(prefix="/usage", tags=["usage"])
 
@@ -161,6 +163,41 @@ def _ensure_usage_stats(db: Session, workspace: Workspace) -> WorkspaceUsageStat
     return stats
 
 
+def _sync_stats_from_accounts(
+    db: Session,
+    workspace: Workspace,
+    stats: WorkspaceUsageStats,
+    *,
+    user_id: UUID | None,
+) -> WorkspaceUsageStats:
+    workspace_account = ensure_workspace_token_account(db, workspace.id)
+    user_account = ensure_user_token_account(db, workspace.id, user_id=user_id)
+
+    stats.weekly_limit = workspace_account.allocated_tokens
+    stats.weekly_used = workspace_account.consumed_tokens
+    stats.daily_limit = workspace_account.allocated_tokens
+    stats.daily_used = workspace_account.consumed_tokens
+    stats.monthly_limit = workspace_account.allocated_tokens
+    stats.monthly_used = workspace_account.consumed_tokens
+    stats.plan_tier = (workspace.billing_plan or "trial").upper()
+
+    if user_account and user_account.allocated_tokens:
+        stats.personal_usage_percent = min(
+            100,
+            round((user_account.consumed_tokens / max(1, user_account.allocated_tokens)) * 100),
+        )
+    else:
+        stats.personal_usage_percent = min(
+            100,
+            round((workspace_account.consumed_tokens / max(1, workspace_account.allocated_tokens)) * 100),
+        )
+    stats.updated_at = _now()
+    db.add(stats)
+    db.commit()
+    db.refresh(stats)
+    return stats
+
+
 def _build_alerts(usage_percent: int) -> list[dict[str, str]]:
     if usage_percent < 80:
         return []
@@ -226,7 +263,9 @@ def get_usage_dashboard(
     if user_id:
         ensure_membership(db, workspace.id, user_id, required_role="viewer")
     stats = _ensure_usage_stats(db, workspace)
+    stats = _sync_stats_from_accounts(db, workspace, stats, user_id=user_id)
     return _serialize_dashboard(stats)
+
 
 class CreditPurchaseRequest(BaseModel):
     workspace_id: UUID | None = None
@@ -239,17 +278,159 @@ def purchase_credits(payload: CreditPurchaseRequest, db: Session = Depends(get_d
     workspace = _resolve_workspace(db, payload.workspace_id)
     if payload.user_id:
         ensure_membership(db, workspace.id, payload.user_id, required_role="viewer")
-    stats = _ensure_usage_stats(db, workspace)
     package = CREDIT_PACKAGES.get(payload.package_id)
     if not package:
         raise HTTPException(status_code=400, detail="Unknown credit package.")
-    stats.weekly_used = max(0, stats.weekly_used - package["credits"])
-    stats.daily_used = max(0, stats.daily_used - max(1, package["credits"] // 10))
-    stats.monthly_used = max(0, stats.monthly_used - package["credits"])
-    stats.updated_at = _now()
-    db.add(stats)
-    db.commit()
-    db.refresh(stats)
+    top_up_tokens(
+        db,
+        workspace_id=workspace.id,
+        user_id=payload.user_id,
+        tokens_to_add=int(package["credits"]),
+        reason=f"credit_package:{payload.package_id}",
+    )
+    stats = _ensure_usage_stats(db, workspace)
+    stats = _sync_stats_from_accounts(db, workspace, stats, user_id=payload.user_id)
     response = _serialize_dashboard(stats)
     response["purchase_message"] = f"{package['credits']} credits added instantly."
     return response
+
+
+class UsageAccountResponse(BaseModel):
+    workspace_id: UUID
+    user_id: UUID | None = None
+    workspace_allocated_tokens: int
+    workspace_consumed_tokens: int
+    workspace_remaining_tokens: int
+    user_allocated_tokens: int | None = None
+    user_consumed_tokens: int | None = None
+    user_remaining_tokens: int | None = None
+
+
+class UsageEventResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    user_id: UUID | None = None
+    feature: str
+    provider: str
+    model: str | None = None
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    deducted_tokens: int
+    cost_units: int
+    request_id: str | None = None
+    created_at: datetime
+
+
+class UsageSimulateRequest(BaseModel):
+    workspace_id: UUID
+    user_id: UUID | None = None
+    total_tokens: int
+    feature: str = "usage.simulated"
+    model: str = "simulated-model"
+
+
+@router.get("/account", response_model=UsageAccountResponse)
+def get_usage_account(workspace_id: UUID, user_id: UUID | None = None, db: Session = Depends(get_db)):
+    if user_id:
+        ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    workspace_account = ensure_workspace_token_account(db, workspace_id)
+    user_account = ensure_user_token_account(db, workspace_id, user_id=user_id) if user_id else None
+    return UsageAccountResponse(
+        workspace_id=workspace_id,
+        user_id=user_account.user_id if user_account else None,
+        workspace_allocated_tokens=workspace_account.allocated_tokens,
+        workspace_consumed_tokens=workspace_account.consumed_tokens,
+        workspace_remaining_tokens=workspace_account.remaining_tokens,
+        user_allocated_tokens=user_account.allocated_tokens if user_account else None,
+        user_consumed_tokens=user_account.consumed_tokens if user_account else None,
+        user_remaining_tokens=user_account.remaining_tokens if user_account else None,
+    )
+
+
+@router.get("/events", response_model=list[UsageEventResponse])
+def list_usage_events(
+    workspace_id: UUID,
+    user_id: UUID | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    if user_id:
+        ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    query = (
+        db.query(models.TokenUsageEvent)
+        .filter(models.TokenUsageEvent.workspace_id == workspace_id)
+        .order_by(models.TokenUsageEvent.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+    )
+    if user_id:
+        query = query.filter(models.TokenUsageEvent.user_id == user_id)
+    rows = query.all()
+    return [
+        UsageEventResponse(
+            id=row.id,
+            workspace_id=row.workspace_id,
+            user_id=row.user_id,
+            feature=row.feature,
+            provider=row.provider,
+            model=row.model,
+            prompt_tokens=row.prompt_tokens,
+            completion_tokens=row.completion_tokens,
+            total_tokens=row.total_tokens,
+            deducted_tokens=row.deducted_tokens,
+            cost_units=row.cost_units,
+            request_id=row.request_id,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/simulate", response_model=UsageAccountResponse)
+def simulate_usage(payload: UsageSimulateRequest, db: Session = Depends(get_db)):
+    if payload.user_id:
+        ensure_membership(db, payload.workspace_id, payload.user_id, required_role="viewer")
+    workspace = db.query(Workspace).filter(Workspace.id == payload.workspace_id).first()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    workspace_account = ensure_workspace_token_account(db, payload.workspace_id)
+    user_account = ensure_user_token_account(db, payload.workspace_id, user_id=payload.user_id)
+    consume = max(0, int(payload.total_tokens))
+    deducted = min(consume, max(0, workspace_account.remaining_tokens))
+    workspace_account.consumed_tokens += deducted
+    workspace_account.remaining_tokens = max(0, workspace_account.remaining_tokens - deducted)
+    db.add(workspace_account)
+    if user_account:
+        user_deducted = min(deducted, max(0, user_account.remaining_tokens))
+        user_account.consumed_tokens += user_deducted
+        user_account.remaining_tokens = max(0, user_account.remaining_tokens - user_deducted)
+        db.add(user_account)
+    event = models.TokenUsageEvent(
+        workspace_id=payload.workspace_id,
+        user_id=user_account.user_id if user_account else payload.user_id,
+        feature=payload.feature,
+        provider="simulated",
+        model=payload.model,
+        prompt_tokens=0,
+        completion_tokens=consume,
+        total_tokens=consume,
+        deducted_tokens=deducted,
+        cost_units=max(0, (consume + 999) // 1000),
+        request_id=None,
+        event_metadata={"simulated": True},
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(workspace_account)
+    if user_account:
+        db.refresh(user_account)
+    return UsageAccountResponse(
+        workspace_id=payload.workspace_id,
+        user_id=user_account.user_id if user_account else None,
+        workspace_allocated_tokens=workspace_account.allocated_tokens,
+        workspace_consumed_tokens=workspace_account.consumed_tokens,
+        workspace_remaining_tokens=workspace_account.remaining_tokens,
+        user_allocated_tokens=user_account.allocated_tokens if user_account else None,
+        user_consumed_tokens=user_account.consumed_tokens if user_account else None,
+        user_remaining_tokens=user_account.remaining_tokens if user_account else None,
+    )

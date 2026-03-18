@@ -13,6 +13,7 @@ import {
   type TaskStatus,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY } from "../constants";
+import { getStoredAgentName } from "../utils/agentProfile";
 
 type TaskItem = {
   id: string;
@@ -98,6 +99,7 @@ export default function TaskBoardBuilder() {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [searchParams] = useSearchParams();
+  const botName = useMemo(() => getStoredAgentName(), []);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [board, setBoard] = useState<TaskBoardRecord | null>(null);
@@ -105,7 +107,7 @@ export default function TaskBoardBuilder() {
   const [boardDescription, setBoardDescription] = useState("AI-generated tasks for your workspace");
   const [columns, setColumns] = useState<UiColumn[]>(EMPTY_COLUMNS);
   const [chat, setChat] = useState<ChatMsg[]>([
-    { role: "assistant", content: "Hi! I'll help you create a task board. What would you like to name your board?" },
+    { role: "assistant", content: `Hi! I'm ${botName}. I'll help you create a task board. What would you like to name your board?` },
   ]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);

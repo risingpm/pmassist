@@ -476,7 +476,7 @@ def generate_phase_feedback(
     lessons: list[str] = []
     try:
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.2,
             response_format={"type": "json_object"},
             messages=[
@@ -533,7 +533,7 @@ def roadmap_reprioritize(
     suggestions: list[schemas.RoadmapReprioritizeSuggestion] = []
     try:
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.2,
             response_format={"type": "json_object"},
             messages=[
@@ -638,7 +638,7 @@ def execution_insights(project_id: str, workspace_id: UUID, user_id: UUID, db: S
             f"{summary_text}"
         )
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.3,
             messages=[
                 {"role": "system", "content": "You summarize project execution status."},

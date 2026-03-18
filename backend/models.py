@@ -146,6 +146,62 @@ class WorkspaceUsageStats(Base):
     workspace = relationship("Workspace", backref="usage_stats")
 
 
+class WorkspaceTokenAccount(Base):
+    __tablename__ = "workspace_token_accounts"
+
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    allocated_tokens = Column(Integer, nullable=False, server_default="0")
+    consumed_tokens = Column(Integer, nullable=False, server_default="0")
+    remaining_tokens = Column(Integer, nullable=False, server_default="0")
+    last_refilled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", backref="token_account")
+
+
+class UserTokenAccount(Base):
+    __tablename__ = "user_token_accounts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    allocated_tokens = Column(Integer, nullable=False, server_default="0")
+    consumed_tokens = Column(Integer, nullable=False, server_default="0")
+    remaining_tokens = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", backref="user_token_accounts")
+    user = relationship("User", backref="token_accounts")
+
+
+class TokenUsageEvent(Base):
+    __tablename__ = "token_usage_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    feature = Column(String, nullable=False)
+    provider = Column(String, nullable=False, server_default="openai")
+    model = Column(String, nullable=True)
+    prompt_tokens = Column(Integer, nullable=False, server_default="0")
+    completion_tokens = Column(Integer, nullable=False, server_default="0")
+    total_tokens = Column(Integer, nullable=False, server_default="0")
+    deducted_tokens = Column(Integer, nullable=False, server_default="0")
+    cost_units = Column(Integer, nullable=False, server_default="0")
+    request_id = Column(String, nullable=True)
+    event_metadata = Column("metadata", JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    workspace = relationship("Workspace", backref="token_usage_events")
+    user = relationship("User", backref="token_usage_events")
+
+
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"
 
@@ -542,7 +598,7 @@ class AIAgent(Base):
     tone = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
     accent_color = Column(String, nullable=True)
-    model_name = Column(String, nullable=False, default="gpt-4o-mini")
+    model_name = Column(String, nullable=False, default="gpt-5-mini")
     temperature = Column(Float, nullable=False, default=0.3)
     max_tokens = Column(Integer, nullable=True)
     instructions = Column(Text, nullable=False)

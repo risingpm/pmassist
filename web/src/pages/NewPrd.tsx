@@ -20,6 +20,7 @@ import uploadIcon from "../assets/prd-new/upload-icon.svg";
 import noteIcon from "../assets/prd-new/note-icon.svg";
 import emptyStateIcon from "../assets/prd-new/empty-state.svg";
 import TypingIndicator from "../components/TypingIndicator";
+import { getStoredAgentName } from "../utils/agentProfile";
 const chatIcon = "https://www.figma.com/api/mcp/asset/86c14b18-8fd2-4570-911a-64f6d05b8bff";
 import {
   createPrd,
@@ -29,6 +30,7 @@ import {
   exportPrd,
   exportWorkspacePrd,
   getProjects,
+  getWorkspacePrds,
   getWorkspacePrd,
   getWorkspacePrdMessages,
   refinePrd,
@@ -37,7 +39,7 @@ import {
   saveWorkspacePrdVersion,
   uploadKnowledgeBaseEntry,
 } from "../api";
-import { DEMO_PROJECT_ID_KEY, SELECTED_PRD_TEMPLATE_KEY } from "../constants";
+import { SELECTED_PRD_TEMPLATE_KEY } from "../constants";
 
 export default function NewPrd() {
   type ChatMessage = {
@@ -50,6 +52,16 @@ export default function NewPrd() {
   const navigate = useNavigate();
   const { workspaceId, prdId } = useParams<{ workspaceId?: string; prdId?: string }>();
   const [searchParams] = useSearchParams();
+  const botName = useMemo(() => getStoredAgentName(), []);
+  const lastPrdStorageKey = useMemo(
+    () => (workspaceId ? `pmassist:last-prd:${workspaceId}` : null),
+    [workspaceId]
+  );
+  const introMessage = useMemo(
+    () =>
+      `Hi! I'm ${botName}, your AI assistant. I'll help you create a comprehensive PRD. Tell me about your product idea and I'll guide you through the process.`,
+    [botName]
+  );
   const [inputValue, setInputValue] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activePrdId, setActivePrdId] = useState<string | null>(null);
@@ -84,15 +96,7 @@ export default function NewPrd() {
   >([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const projectId = useMemo(() => {
-    if (searchParams.get("projectId")) {
-      return searchParams.get("projectId");
-    }
-    if (typeof window !== "undefined") {
-      return window.localStorage.getItem(DEMO_PROJECT_ID_KEY);
-    }
-    return null;
-  }, [searchParams]);
+  const projectId = useMemo(() => searchParams.get("projectId"), [searchParams]);
   const headerProjectLabel = activePrdProjectId
     ? projects.find((project) => project.id === activePrdProjectId)?.title || "Project Selected"
     : "No Project";
@@ -108,7 +112,7 @@ export default function NewPrd() {
   const previewSections = [
     {
       title: "Overview",
-      placeholder: "Chat with ProductBot to define the overview of your product or feature...",
+      placeholder: `Chat with ${botName} to define the overview of your product or feature...`,
     },
     {
       title: "Problem Statement",
@@ -116,7 +120,7 @@ export default function NewPrd() {
     },
     {
       title: "User Stories",
-      placeholder: "User stories will be generated based on your conversation with ProductBot...",
+      placeholder: `User stories will be generated based on your conversation with ${botName}...`,
     },
     {
       title: "Requirements",
@@ -209,61 +213,106 @@ export default function NewPrd() {
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId || !prdId) {
-      if (!prdId) {
+    if (!workspaceId) {
+      return;
+    }
+
+    const applyPrdThread = async (candidatePrdId: string) => {
+      const [prd, history] = await Promise.all([
+        getWorkspacePrd(candidatePrdId, workspaceId),
+        getWorkspacePrdMessages(candidatePrdId, workspaceId),
+      ]);
+      setActivePrdId(prd.id);
+      setActivePrdProjectId(prd.project_id ?? null);
+      setActivePrdContent(prd.content || "");
+      setLastUpdatedAt(prd.updated_at);
+      setSaveTitle(prd.feature_name || "Untitled PRD");
+      if (history.length) {
+        const mapped = history.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          timestamp: new Date(message.created_at).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        }));
+        setMessages(mapped);
+      } else {
         setMessages([
           {
             id: "intro",
             role: "assistant" as const,
-            content:
-              "Hi! I'm ProductBot, your AI assistant. I'll help you create a comprehensive PRD. Tell me about your product idea and I'll guide you through the process.",
+            content: introMessage,
             timestamp: "01:02 PM",
           },
         ]);
       }
+      if (lastPrdStorageKey && typeof window !== "undefined") {
+        window.sessionStorage.setItem(lastPrdStorageKey, prd.id);
+      }
+      if (!prdId) {
+        navigate(`/workspaces/${workspaceId}/prd/${prd.id}`, { replace: true });
+      }
+    };
+
+    if (!prdId) {
+      const restoreLatestPrd = async () => {
+        const candidateIds: string[] = [];
+        if (lastPrdStorageKey && typeof window !== "undefined") {
+          const stored = window.sessionStorage.getItem(lastPrdStorageKey);
+          if (stored) {
+            candidateIds.push(stored);
+          }
+        }
+        try {
+          const latest = await getWorkspacePrds(workspaceId);
+          if (latest.length && !candidateIds.includes(latest[0].id)) {
+            candidateIds.push(latest[0].id);
+          }
+        } catch {
+          // Non-blocking: we can still open a fresh chat.
+        }
+
+        for (const candidate of candidateIds) {
+          try {
+            await applyPrdThread(candidate);
+            return;
+          } catch {
+            if (lastPrdStorageKey && typeof window !== "undefined") {
+              window.sessionStorage.removeItem(lastPrdStorageKey);
+            }
+          }
+        }
+
+        setMessages([
+          {
+            id: "intro",
+            role: "assistant" as const,
+            content: introMessage,
+            timestamp: "01:02 PM",
+          },
+        ]);
+      };
+      restoreLatestPrd();
       return;
     }
 
     const fetchPrd = async () => {
       try {
-        const [prd, history] = await Promise.all([
-          getWorkspacePrd(prdId, workspaceId),
-          getWorkspacePrdMessages(prdId, workspaceId),
-        ]);
-        setActivePrdId(prd.id);
-        setActivePrdProjectId(prd.project_id ?? null);
-        setActivePrdContent(prd.content || "");
-        setLastUpdatedAt(prd.updated_at);
-        setSaveTitle(prd.feature_name || "Untitled PRD");
-        if (history.length) {
-          const mapped = history.map((message) => ({
-            id: message.id,
-            role: message.role,
-            content: message.content,
-            timestamp: new Date(message.created_at).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          }));
-          setMessages(mapped);
-        } else {
-          setMessages([
-            {
-              id: "intro",
-              role: "assistant" as const,
-              content:
-                "Hi! I'm ProductBot, your AI assistant. I'll help you create a comprehensive PRD. Tell me about your product idea and I'll guide you through the process.",
-              timestamp: "01:02 PM",
-            },
-          ]);
-        }
+        await applyPrdThread(prdId);
       } catch (error) {
         setStatusMessage(error instanceof Error ? error.message : "Failed to load PRD.");
       }
     };
 
     fetchPrd();
-  }, [workspaceId, prdId]);
+  }, [workspaceId, prdId, introMessage, navigate, lastPrdStorageKey]);
+
+  useEffect(() => {
+    if (!activePrdId || !lastPrdStorageKey || typeof window === "undefined") return;
+    window.sessionStorage.setItem(lastPrdStorageKey, activePrdId);
+  }, [activePrdId, lastPrdStorageKey]);
 
   const handleBack = () => {
     if (workspaceId) {
@@ -342,6 +391,7 @@ export default function NewPrd() {
         setActivePrdId(prd.id);
         setLastUpdatedAt(prd.updated_at);
         setActivePrdProjectId(prd.project_id ?? projectId ?? null);
+        navigate(`/workspaces/${workspaceId}/prd/${prd.id}`, { replace: true });
         if (prd.content) {
           setActivePrdContent(prd.content);
         }
@@ -363,6 +413,7 @@ export default function NewPrd() {
       setActivePrdId(refined.id);
       setLastUpdatedAt(refined.updated_at);
       setActivePrdProjectId(refined.project_id ?? activePrdProjectId ?? projectId ?? null);
+      navigate(`/workspaces/${workspaceId}/prd/${refined.id}`, { replace: true });
       if (refined.content) {
         setActivePrdContent(refined.content);
       }
@@ -643,11 +694,11 @@ export default function NewPrd() {
                         setStatusMessage("Workspace not found.");
                         return;
                       }
-                      navigate(`/workspaces/${workspaceId}/templates`);
+                      navigate(`/workspaces/${workspaceId}/prds`);
                     }}
                   >
                     <img alt="" className="h-4 w-4" src={browseIcon} />
-                    Browse Templates
+                    Browse PRDs
                   </button>
                 </div>
               </div>
@@ -724,7 +775,7 @@ export default function NewPrd() {
                       </div>
                       <div className="flex max-w-[690px] flex-col gap-1">
                         <div className="rounded-[16px] border border-[#e5e7eb] bg-white px-[21px] py-[13px] text-[14px] leading-[22.75px] text-[#101828] shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1),0px_1px_2px_-1px_rgba(0,0,0,0.1)]">
-                          <TypingIndicator label="ProductBot" />
+                          <TypingIndicator label={botName} />
                         </div>
                       </div>
                     </div>
@@ -739,7 +790,7 @@ export default function NewPrd() {
                     <div className="relative flex-1">
                       <input
                         className="h-12 w-full rounded-[8px] border border-transparent bg-[#f3f3f5] py-1 pl-3 pr-12 text-[14px] tracking-[-0.1504px] text-[#101828] placeholder:text-[#717182]"
-                        placeholder="Message ProductBot..."
+                        placeholder={`Message ${botName}...`}
                         value={inputValue}
                         onChange={(event) => setInputValue(event.target.value)}
                         onKeyDown={(event) => {
@@ -771,7 +822,7 @@ export default function NewPrd() {
                     </button>
                   </div>
                   <p className="text-center text-[12px] leading-[16px] text-[#6a7282]">
-                    ProductBot can help you structure your PRD, suggest content, and refine your ideas
+                    {botName} can help you structure your PRD, suggest content, and refine your ideas
                   </p>
                 </div>
               </div>
@@ -844,7 +895,7 @@ export default function NewPrd() {
                 <div className="flex items-center justify-between border-t border-[#e5e7eb] bg-[#f9fafb] px-8 py-4 text-[14px] text-[#6a7282]">
                   <div className="flex items-center gap-2">
                     <img alt="" className="h-4 w-4" src={botIcon} />
-                    Generated with ProductBot
+                    {`Generated with ${botName}`}
                   </div>
                   <div>{messageCount} messages</div>
                 </div>
@@ -871,7 +922,7 @@ export default function NewPrd() {
           <div className="flex flex-1 flex-col gap-4 px-4 pb-0 pt-4">
             <div className="rounded-[10px] border border-[#e5e7eb] bg-white px-[25px] py-[25px]">
               <p className="text-[12px] leading-[16px] text-[#6a7282]">
-                Add context to help ProductBot understand your product better
+                {`Add context to help ${botName} understand your product better`}
               </p>
               <div className="relative mt-4">
                 <button
@@ -1122,7 +1173,7 @@ export default function NewPrd() {
                 onChange={(event) => setNoteContent(event.target.value.slice(0, 1000))}
               />
               <div className="mt-2 flex items-center justify-between text-[12px] text-[#99a1af]">
-                <span>Be specific so ProductBot can reuse this context.</span>
+                <span>{`Be specific so ${botName} can reuse this context.`}</span>
                 <span>{noteContent.length}/1000</span>
               </div>
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { getTaskBoard, listTaskBoards, type TaskBoardRecord } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY } from "../constants";
+import { getStoredAgentName } from "../utils/agentProfile";
 
 type BoardCard = {
   board: TaskBoardRecord;
@@ -71,6 +72,7 @@ function formatRelativeDay(iso: string): string {
 export default function TaskBoardsPage() {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const botName = useMemo(() => getStoredAgentName(), []);
   const [userId, setUserId] = useState<string | null>(null);
   const [boards, setBoards] = useState<BoardCard[]>([]);
   const [search, setSearch] = useState("");
@@ -210,7 +212,7 @@ export default function TaskBoardsPage() {
         {!loading && filteredBoards.length === 0 ? (
           <div className="rounded-[14px] border border-black/10 bg-white p-8">
             <p className="text-[16px] font-semibold text-[#101828]">No task boards yet</p>
-            <p className="mt-2 text-[14px] text-[#6a7282]">Create your first board and use ProductBot to draft tasks instantly.</p>
+            <p className="mt-2 text-[14px] text-[#6a7282]">{`Create your first board and use ${botName} to draft tasks instantly.`}</p>
             <button
               type="button"
               className="mt-4 inline-flex h-9 items-center gap-2 rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] px-4 text-[14px] font-medium text-white"

@@ -104,7 +104,7 @@ def _call_agent(  # noqa: PLR0913
         ]
 
         configured_candidates = [PROTOTYPE_AGENT_MODEL] if PROTOTYPE_AGENT_MODEL else []
-        default_candidates = ["gpt-4.1", "gpt-4o", "gpt-4o-mini"]
+        default_candidates = ["gpt-4.1", "gpt-4o", "gpt-5-mini"]
 
         model_candidates: list[str] = []
         for model_name in configured_candidates + default_candidates:

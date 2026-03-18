@@ -15,6 +15,7 @@ import {
   type WorkspaceChatMessage,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY } from "../constants";
+import { getStoredAgentName } from "../utils/agentProfile";
 
 type ProjectContextItem = {
   id: string;
@@ -26,11 +27,12 @@ type ProjectContextItem = {
 };
 
 const PROJECT_COLORS = ["#ad46ff", "#2b7fff", "#00c950", "#ff6900", "#615fff", "#f6339a"];
-const DEFAULT_WELCOME =
-  "Hi! I'm your AI assistant. I can help with product tasks, brainstorm ideas, and answer questions. Select a project from the right panel for context-aware help, or start chatting directly.";
+function getDefaultWelcome(botName: string) {
+  return `Hi! I'm ${botName}, your AI assistant. I can help with product tasks, brainstorm ideas, and answer questions. Select a project from the right panel for context-aware help, or start chatting directly.`;
+}
 
-function getProjectWelcome(projectName: string) {
-  return `Hi! I'm your AI assistant for the ${projectName} project. I have access to all your project context including PRDs, roadmaps, and tasks. How can I help you today?`;
+function getProjectWelcome(projectName: string, botName: string) {
+  return `Hi! I'm ${botName}, your AI assistant for the ${projectName} project. I have access to all your project context including PRDs, roadmaps, and tasks. How can I help you today?`;
 }
 
 function IconBack() {
@@ -118,12 +120,14 @@ function formatHistoryDate(iso?: string | null) {
 export default function AIChatPage() {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const botName = useMemo(() => getStoredAgentName(), []);
+  const defaultWelcome = useMemo(() => getDefaultWelcome(botName), [botName]);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [messages, setMessages] = useState<WorkspaceChatMessage[]>([
     {
       role: "assistant",
-      content: DEFAULT_WELCOME,
+      content: defaultWelcome,
       created_at: new Date().toISOString(),
     },
   ]);
@@ -263,7 +267,7 @@ export default function AIChatPage() {
 
   useEffect(() => {
     if (!selectedProject || sessionId || messages.length !== 1 || messages[0].role !== "assistant") return;
-    const projectWelcome = getProjectWelcome(selectedProject.title);
+    const projectWelcome = getProjectWelcome(selectedProject.title, botName);
     if (messages[0].content === projectWelcome) return;
     setMessages([
       {
@@ -272,7 +276,7 @@ export default function AIChatPage() {
         created_at: new Date().toISOString(),
       },
     ]);
-  }, [selectedProject, sessionId, messages]);
+  }, [selectedProject, sessionId, messages, botName]);
 
   const handleSend = async () => {
     if (!workspaceId || !userId || !input.trim() || sending) return;
@@ -312,7 +316,7 @@ export default function AIChatPage() {
     setMessages([
       {
         role: "assistant",
-        content: selectedProject ? getProjectWelcome(selectedProject.title) : DEFAULT_WELCOME,
+        content: selectedProject ? getProjectWelcome(selectedProject.title, botName) : defaultWelcome,
         created_at: new Date().toISOString(),
       },
     ]);
@@ -401,7 +405,7 @@ export default function AIChatPage() {
                 backgroundClip: "text",
               }}
             >
-              8product.ai
+              8product.com
             </p>
           </div>
         </div>

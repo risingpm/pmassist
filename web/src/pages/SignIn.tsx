@@ -24,6 +24,7 @@ import {
   DEMO_INITIALIZED_KEY,
   DEMO_WORKSPACE_ID_KEY,
   DEMO_PROJECT_ID_KEY,
+  SHOW_SUBSCRIPTION_MODAL_KEY,
 } from "../constants";
 import { setStoredAgentProfile } from "../utils/agentProfile";
 
@@ -164,6 +165,10 @@ export default function SignInPage() {
   };
 
   const completeSignIn = async (authResult: AuthResponse) => {
+    if (typeof window !== "undefined" && authResult.is_new_user) {
+      window.sessionStorage.setItem(SHOW_SUBSCRIPTION_MODAL_KEY, "1");
+    }
+
     let workspaceId = authResult.workspace_id ?? null;
     let workspaceName = authResult.workspace_name ?? null;
 
@@ -198,22 +203,20 @@ export default function SignInPage() {
       const agent = await getUserAgent(authResult.id);
       if (agent) {
         setStoredAgentProfile({ name: agent.name || DEFAULT_AGENT_NAME });
-        if (workspaceId) {
-          navigate(`/workspaces/${workspaceId}/projects`, { replace: true });
-        } else {
-          navigate("/onboarding", { replace: true });
-        }
-        return;
+      } else {
+        setStoredAgentProfile(null);
       }
-      setStoredAgentProfile(null);
     } catch (err) {
       console.warn("No agent found after sign in", err);
       setStoredAgentProfile(null);
     }
 
-    navigate("/onboarding", {
-      replace: true,
-    });
+    if (workspaceId) {
+      navigate(`/workspaces/${workspaceId}/home`, { replace: true });
+      return;
+    }
+
+    navigate("/onboarding", { replace: true });
   };
 
   const handleGoogleCredential = async (credential: string) => {

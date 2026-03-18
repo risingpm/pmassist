@@ -109,7 +109,7 @@ Relevant knowledge base context:
     try:
         client = get_openai_client(db, payload.workspace_id)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.2,
             messages=[
                 {"role": "system", "content": "You output JSON only."},

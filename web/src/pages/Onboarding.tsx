@@ -27,8 +27,6 @@ import {
   DEMO_PROJECT_ID_KEY,
 } from "../constants";
 import { setStoredAgentProfile } from "../utils/agentProfile";
-import WelcomeOnboardingCard from "../components/WelcomeOnboardingCard";
-import profileBackIcon from "../assets/onboarding/profile-back.svg";
 import profileNextIcon from "../assets/onboarding/profile-next.svg";
 import googleIcon from "../assets/onboarding/google-icon.svg";
 import featurePrdIcon from "../assets/onboarding/feature-prd.svg";
@@ -185,7 +183,6 @@ const PLATFORM_FEATURES = [
     icon: featureIntegrationsIcon,
   },
 ];
-const PROFILE_BACK_ICON_URL = profileBackIcon;
 const PROFILE_NEXT_ICON_URL = profileNextIcon;
 const ASSISTANT_NAME_SUGGESTIONS = [
   { emoji: "🗺️", name: "Atlas" },
@@ -263,7 +260,6 @@ export default function OnboardingPage() {
   const [stepError, setStepError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(true);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
   const queryUserId = useMemo(() => {
@@ -1111,10 +1107,6 @@ export default function OnboardingPage() {
     }
   };
 
-  if (showWelcome) {
-    return <WelcomeOnboardingCard onGetStarted={() => setShowWelcome(false)} />;
-  }
-
   if (step === 0) {
     const hasRequiredProfile = formState.fullName.trim() && formState.email.trim();
     return (
@@ -1131,7 +1123,7 @@ export default function OnboardingPage() {
               <div className="h-2 rounded-full bg-[#030213]" style={{ width: "33%" }} />
             </div>
             <p className="text-center text-sm font-normal tracking-[-0.1504px] text-[#6a7282]">
-              Step 2 of 6
+              Step 1 of 4
             </p>
           </div>
           <div className="h-[690px] rounded-[16px] bg-white px-[48px] pt-[48px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)]">
@@ -1248,17 +1240,6 @@ export default function OnboardingPage() {
               <div className="mt-auto flex items-center gap-4">
                 <button
                   type="button"
-                  onClick={() => {
-                    setStepError(null);
-                    setShowWelcome(true);
-                  }}
-                  className="flex h-9 items-center gap-2 rounded-[8px] border border-black/10 bg-white px-3 text-[14px] font-medium text-[#0a0a0a]"
-                >
-                  <img alt="" className="h-4 w-4" src={PROFILE_BACK_ICON_URL} />
-                  Back
-                </button>
-                <button
-                  type="button"
                   onClick={async () => {
                     const validationError = validateStep(0, formState);
                     if (validationError) {
@@ -1291,7 +1272,7 @@ export default function OnboardingPage() {
                     setStep(1);
                   }}
                   disabled={!hasRequiredProfile}
-                  className="flex h-9 flex-1 items-center justify-center gap-2 rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-[14px] font-medium text-white disabled:opacity-50"
+                  className="flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-[14px] font-medium text-white disabled:opacity-50"
                 >
                   Continue
                   <img alt="" className="h-4 w-4" src={PROFILE_NEXT_ICON_URL} />
@@ -1320,7 +1301,7 @@ export default function OnboardingPage() {
               <div className="h-2 rounded-full bg-[#030213]" style={{ width: "50%" }} />
             </div>
             <p className="text-center text-sm font-normal tracking-[-0.1504px] text-[#6a7282]">
-              Step 3 of 6
+              Step 2 of 4
             </p>
           </div>
           <div className="h-[800px] rounded-[16px] bg-white px-[40px] pt-[40px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)]">
@@ -1426,7 +1407,7 @@ export default function OnboardingPage() {
               <div className="h-2 rounded-full bg-[#030213]" style={{ width: "66%" }} />
             </div>
             <p className="text-center text-sm font-normal tracking-[-0.1504px] text-[#6a7282]">
-              Step 4 of 6
+              Step 3 of 4
             </p>
           </div>
           <div className="h-[536px] rounded-[16px] bg-white px-[48px] pt-[48px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)]">
@@ -1544,7 +1525,7 @@ export default function OnboardingPage() {
               <div className="h-2 rounded-full bg-[#030213]" style={{ width: "83%" }} />
             </div>
             <p className="text-center text-sm font-normal tracking-[-0.1504px] text-[#6a7282]">
-              Step 5 of 6
+              Step 4 of 4
             </p>
           </div>
           <div className="h-[700px] rounded-[16px] bg-white px-[48px] pt-[48px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)]">
@@ -1667,7 +1648,7 @@ export default function OnboardingPage() {
               8
             </div>
             <div>
-              <span className="text-base font-semibold tracking-tight text-white">8product.ai</span>
+              <span className="text-base font-semibold tracking-tight text-white">8product.com</span>
               <p className="text-xs uppercase tracking-[0.3em] text-white/50">AI PM Builder</p>
             </div>
           </div>

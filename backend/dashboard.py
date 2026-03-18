@@ -73,7 +73,7 @@ def get_dashboard_coach(payload: schemas.DashboardCoachRequest, db: Session = De
     try:
         client = get_openai_client(db, payload.workspace_id)
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.2,
             messages=[
                 {"role": "system", "content": "Respond with JSON."},

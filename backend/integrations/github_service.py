@@ -776,7 +776,7 @@ def _summarize_file(file_path: str, content: str, *, is_code: bool) -> str:
         )
 
     response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},

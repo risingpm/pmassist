@@ -16,7 +16,7 @@ from backend.knowledge_base_service import ensure_workspace_kb, get_kb_context_e
 from backend.workspaces import get_project_in_workspace
 from backend.template_service import get_template_version
 from backend.ai_guardrails import bundle_context_entries, render_context_block, verify_citations
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import metered_chat_completion
 from backend.agent_defaults import get_default_roadmap_agent
 
 logger = logging.getLogger(__name__)
@@ -371,6 +371,7 @@ def _plan_roadmap_turn_smart(
     db: Session,
     workspace_id: UUID,
     *,
+    user_id: UUID | None,
     history: list[schemas.RoadmapChatMessage],
     prompt: str,
     context_block: str,
@@ -378,8 +379,7 @@ def _plan_roadmap_turn_smart(
     heuristic_plan = _plan_roadmap_turn(history, prompt)
     try:
         agent = get_default_roadmap_agent(db, workspace_id)
-        client = get_openai_client(db, workspace_id)
-        model_name = agent.model_name if agent and agent.model_name else "gpt-4o-mini"
+        model_name = agent.model_name if agent and agent.model_name else "gpt-5-mini"
         messages = [
             {"role": "system", "content": ROADMAP_TURN_PLANNER_PROMPT},
             {
@@ -395,7 +395,11 @@ def _plan_roadmap_turn_smart(
                 ),
             },
         ]
-        response = client.chat.completions.create(
+        response = metered_chat_completion(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            feature="roadmap.turn_planner",
             model=model_name,
             messages=messages,
             temperature=0.2,
@@ -541,6 +545,7 @@ def _generate_roadmap_markdown(
     db: Session,
     workspace_id: UUID,
     *,
+    user_id: UUID | None,
     context_prompt: str,
     history: list[schemas.RoadmapChatMessage],
     template_id: UUID | None,
@@ -559,8 +564,7 @@ def _generate_roadmap_markdown(
     try:
         # Try LLM generation first for better roadmap quality; keep strict timeout.
         agent = get_default_roadmap_agent(db, workspace_id)
-        client = get_openai_client(db, workspace_id)
-        model_name = agent.model_name if agent and agent.model_name else "gpt-4o-mini"
+        model_name = agent.model_name if agent and agent.model_name else "gpt-5-mini"
         llm_messages: list[dict[str, str]] = [
             {"role": "system", "content": ROADMAP_GENERATOR_PROMPT},
             {"role": "user", "content": context_prompt},
@@ -573,7 +577,11 @@ def _generate_roadmap_markdown(
                 }
             )
         llm_messages.extend({"role": msg.role, "content": msg.content} for msg in history)
-        llm_response = client.chat.completions.create(
+        llm_response = metered_chat_completion(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            feature="roadmap.generate",
             model=model_name,
             messages=llm_messages,
             temperature=0.25,
@@ -673,6 +681,7 @@ def generate_roadmap_endpoint(
     turn_plan = _plan_roadmap_turn_smart(
         db,
         payload.workspace_id,
+        user_id=payload.user_id,
         history=effective_history,
         prompt=prompt,
         context_block=context_block,
@@ -701,6 +710,7 @@ def generate_roadmap_endpoint(
     roadmap_markdown = _generate_roadmap_markdown(
         db,
         payload.workspace_id,
+        user_id=payload.user_id,
         context_prompt=(
             f"Project context:\n{context_block}\n\n"
             "Generate a complete roadmap now."
@@ -773,6 +783,7 @@ def generate_workspace_roadmap(payload: schemas.RoadmapGenerateRequest, db: Sess
     turn_plan = _plan_roadmap_turn_smart(
         db,
         workspace.id,
+        user_id=payload.user_id,
         history=effective_history,
         prompt=prompt,
         context_block=context_block,
@@ -796,6 +807,7 @@ def generate_workspace_roadmap(payload: schemas.RoadmapGenerateRequest, db: Sess
     roadmap_markdown = _generate_roadmap_markdown(
         db,
         workspace.id,
+        user_id=payload.user_id,
         context_prompt=(
             f"Workspace context:\n{context_block}\n\n"
             "Generate a complete workspace roadmap now."

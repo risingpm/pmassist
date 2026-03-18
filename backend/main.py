@@ -327,7 +327,7 @@ def _call_project_builder(
     conversation = "\n".join(f"{msg.role}: {msg.content}" for msg in messages)
     payload = json.dumps(attributes or {}, ensure_ascii=False)
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         messages=[
             {
                 "role": "system",
@@ -431,7 +431,7 @@ def _call_project_brief(
         title = (entry.title or "Context").strip()
         context_lines.append(f"- {title}{source}: {content}")
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         messages=[
             {
                 "role": "system",

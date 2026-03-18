@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import logoIcon from "../assets/dashboard/logo-icon.svg";
@@ -19,14 +19,23 @@ import cardAgent from "../assets/dashboard/card-agent.svg";
 import infoBot from "../assets/dashboard/info-bot.svg";
 import infoProjects from "../assets/dashboard/info-projects.svg";
 import helpIcon from "../assets/dashboard/help-icon.svg";
-import { logout } from "../api";
-import { AUTH_USER_KEY } from "../constants";
+import { createBillingCheckoutSession, getWorkspaceBillingStatus, logout } from "../api";
+import { AUTH_USER_KEY, SHOW_SUBSCRIPTION_MODAL_KEY } from "../constants";
 
 function HomeChatIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 20 20" fill="none">
       <rect x="3" y="3" width="14" height="12" rx="3" stroke="currentColor" strokeWidth="1.6" />
       <path d="m7 17 2.5-2h4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SubscriptionIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 20 20" fill="none">
+      <rect x="3.5" y="5.5" width="13" height="9" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3.5 8.5h13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
@@ -84,6 +93,10 @@ export default function WorkspaceLanding() {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const accountMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const profile = useMemo(() => {
     if (typeof window === "undefined") {
       return { name: "User", subtitle: "Workspace member", initials: "U" };
@@ -152,10 +165,106 @@ export default function WorkspaceLanding() {
     navigate("/signin", { replace: true });
   };
 
+  const openAccountMenu = () => {
+    if (accountMenuCloseTimer.current) {
+      clearTimeout(accountMenuCloseTimer.current);
+      accountMenuCloseTimer.current = null;
+    }
+    setShowAccountMenu(true);
+  };
+
+  const closeAccountMenu = () => {
+    if (accountMenuCloseTimer.current) {
+      clearTimeout(accountMenuCloseTimer.current);
+    }
+    accountMenuCloseTimer.current = setTimeout(() => {
+      setShowAccountMenu(false);
+      accountMenuCloseTimer.current = null;
+    }, 150);
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !workspaceId) return;
+
+    const forceShow = window.sessionStorage.getItem(SHOW_SUBSCRIPTION_MODAL_KEY) === "1";
+    const seenKey = `pmassist:subscription-modal-seen:${workspaceId}`;
+
+    if (forceShow) {
+      setShowSubscriptionModal(true);
+      return;
+    }
+
+    if (window.localStorage.getItem(seenKey) === "1") {
+      return;
+    }
+
+    let cancelled = false;
+    void getWorkspaceBillingStatus(workspaceId)
+      .then((billing) => {
+        if (cancelled) return;
+        const hasPaidPlan = billing.plan === "pro" || billing.plan === "team";
+        const hasActiveBilling = billing.status === "active";
+        if (!hasPaidPlan || !hasActiveBilling) {
+          setShowSubscriptionModal(true);
+        }
+      })
+      .catch(() => {
+        // Ignore billing fetch errors here; avoid blocking page render.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    return () => {
+      if (accountMenuCloseTimer.current) {
+        clearTimeout(accountMenuCloseTimer.current);
+      }
+    };
+  }, []);
+
+  const closeSubscriptionModal = () => {
+    if (typeof window !== "undefined") {
+      if (workspaceId) {
+        window.localStorage.setItem(`pmassist:subscription-modal-seen:${workspaceId}`, "1");
+      }
+      window.sessionStorage.removeItem(SHOW_SUBSCRIPTION_MODAL_KEY);
+    }
+    setShowSubscriptionModal(false);
+    setCheckoutError(null);
+  };
+
+  const handleLifetimeAccess = async () => {
+    if (!workspaceId || checkoutLoading) return;
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    try {
+      const origin = typeof window !== "undefined" ? window.location.origin : undefined;
+      const successUrl = origin ? `${origin}/workspaces/${workspaceId}/home?checkout=success` : undefined;
+      const cancelUrl = origin ? `${origin}/workspaces/${workspaceId}/home?checkout=cancelled` : undefined;
+      const checkout = await createBillingCheckoutSession({
+        workspaceId,
+        plan: "pro",
+        successUrl,
+        cancelUrl,
+      });
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(SHOW_SUBSCRIPTION_MODAL_KEY);
+        window.location.href = checkout.checkout_url;
+      }
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Unable to start checkout.");
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#f9fafb]">
-      <div className="flex min-h-screen">
-        <aside className="w-64 border-r border-[#e5e7eb] bg-white">
+    <div className="h-screen overflow-hidden bg-[#f9fafb]">
+      <div className="flex h-screen">
+        <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-[#e5e7eb] bg-white">
           <div className="border-b border-[#e5e7eb] px-6 py-6">
             <div className="flex items-center gap-3">
               <img alt="" className="h-8 w-8" src={logoIcon} />
@@ -168,12 +277,12 @@ export default function WorkspaceLanding() {
                   backgroundClip: "text",
                 }}
               >
-                8product.ai
+                8product.com
               </span>
             </div>
           </div>
 
-          <div className="px-4 pt-4">
+          <div className="flex-1 overflow-y-auto px-4 pt-4">
             <nav className="space-y-1">
               {NAV_ITEMS.map((item) => (
                 <button
@@ -191,9 +300,20 @@ export default function WorkspaceLanding() {
             </nav>
           </div>
 
+          <div className="mt-auto border-t border-[#e5e7eb] px-4 py-4">
+            <button
+              type="button"
+              className="flex h-12 w-full items-center gap-3 rounded-[10px] px-4 text-[16px] font-medium tracking-[-0.3125px] text-[#364153]"
+              onClick={() => handleNavClick("subscription")}
+            >
+              <SubscriptionIcon />
+              Subscription
+            </button>
+          </div>
+
         </aside>
 
-        <main className="flex-1">
+        <main className="flex-1 overflow-y-auto">
         <header className="border-b border-[#e5e7eb] bg-white px-8 py-4">
             <div className="flex items-center justify-between">
               <div>
@@ -204,9 +324,9 @@ export default function WorkspaceLanding() {
               </div>
               <div className="flex items-center gap-3">
                 <div
-                  className="relative"
-                  onMouseEnter={() => setShowAccountMenu(true)}
-                  onMouseLeave={() => setShowAccountMenu(false)}
+                  className="relative pb-2"
+                  onMouseEnter={openAccountMenu}
+                  onMouseLeave={closeAccountMenu}
                 >
                 <div className="flex items-center gap-3 rounded-[10px] border border-[#e5e7eb] px-3 py-1.5">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#9810fa] text-[13px] font-medium text-white">
@@ -219,7 +339,7 @@ export default function WorkspaceLanding() {
                   <img alt="" className="h-4 w-4" src={userMenu} />
                 </div>
                   {showAccountMenu ? (
-                    <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[180px] rounded-[10px] border border-[#e5e7eb] bg-white p-2 shadow-lg">
+                    <div className="absolute right-0 top-full z-20 mt-1 w-[180px] rounded-[10px] border border-[#e5e7eb] bg-white p-2 shadow-lg">
                       <button
                         type="button"
                         onClick={() => void handleLogout()}
@@ -319,6 +439,86 @@ export default function WorkspaceLanding() {
         </section>
         </main>
       </div>
+      {showSubscriptionModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-[448px] overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl">
+            <div className="relative h-[245px] bg-[linear-gradient(151deg,#9810fa_0%,#ad46ff_50%,#155dfc_100%)] px-6 pt-6 text-white">
+              <button
+                type="button"
+                className="absolute right-4 top-4 rounded-md p-1.5 text-white/80 transition hover:bg-white/15 hover:text-white"
+                onClick={closeSubscriptionModal}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20">
+                <svg aria-hidden="true" className="h-10 w-10" viewBox="0 0 24 24" fill="none">
+                  <path d="M4 8.5 8 12l4-6 4 6 4-3.5-1.5 10H5.5L4 8.5Z" stroke="white" strokeWidth="1.75" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <h2 className="mt-3 text-center text-[36px] font-bold leading-10 tracking-[0.03em] text-white">Unlock Pro Access</h2>
+              <p className="mt-1 text-center text-base text-[#f3e8ff]">Get full access to all features</p>
+              <div className="mt-3 flex items-end justify-center gap-1">
+                <span className="text-5xl font-bold leading-none tracking-[0.01em]">$8</span>
+                <span className="pb-[6px] text-lg text-[#e9d4ff]">/month</span>
+              </div>
+            </div>
+            <div className="px-6 pb-5 pt-5">
+              <div className="inline-flex items-center gap-2 rounded-full bg-[#f3e8ff] px-3 py-1 text-sm font-medium text-[#8200db]">
+                <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3v3M12 18v3M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M3 12h3M18 12h3M5.64 18.36l2.12-2.12M16.24 7.76l2.12-2.12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                </svg>
+                Includes 1M AI Tokens
+              </div>
+              <p className="mt-3 max-w-[360px] text-sm leading-5 text-[#4a5565]">
+                Everything you need to build amazing products with AI assistance.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-x-7 gap-y-2 text-sm text-[#364153]">
+                {[
+                  "Unlimited PRDs",
+                  "Unlimited Roadmaps",
+                  "Unlimited Agents",
+                  "Unlimited Projects",
+                  "1M AI tokens/month",
+                  "All integrations",
+                  "Priority support",
+                  "Regular updates",
+                ].map((item) => (
+                  <div key={item} className="flex items-center gap-2">
+                    <svg aria-hidden="true" className="h-4 w-4 text-[#22c55e]" viewBox="0 0 20 20" fill="none">
+                      <path d="m4.5 10 3.5 3.5 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+              {checkoutError ? (
+                <p className="mt-4 rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-[13px] text-[#b91c1c]">
+                  {checkoutError}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void handleLifetimeAccess()}
+                disabled={checkoutLoading || !workspaceId}
+                className="mt-4 h-10 w-full rounded-lg bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-base font-medium text-white transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {checkoutLoading ? "Redirecting..." : "Subscribe for $8/month"}
+              </button>
+              <button
+                type="button"
+                onClick={closeSubscriptionModal}
+                className="mt-2 h-9 w-full rounded-lg text-sm font-medium text-[#6a7282] transition hover:bg-[#f8fafc]"
+              >
+                Skip for now
+              </button>
+              <p className="mt-2 text-center text-xs leading-4 text-[#6a7282]">
+                ✨ Join thousands of product managers building better products with AI
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

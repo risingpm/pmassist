@@ -26,6 +26,7 @@ import {
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
 import SafeMarkdown from "../components/SafeMarkdown";
 import TypingIndicator from "../components/TypingIndicator";
+import { getStoredAgentName } from "../utils/agentProfile";
 
 type RBIconName =
   | "back"
@@ -141,8 +142,8 @@ function RBIcon({ name, className }: { name: RBIconName; className?: string }) {
   }
 }
 
-const INTRO_MESSAGE =
-  "Hi! I can help you build your roadmap. Share the vision, target users, success metrics, timeline, and any constraints to get started.";
+const getIntroMessage = (botName: string) =>
+  `Hi! I'm ${botName}. I can help you build your roadmap. Share the vision, target users, success metrics, timeline, and any constraints to get started.`;
 
 const DEFAULT_SUGGESTIONS = [
   "Target users are...",
@@ -174,9 +175,11 @@ const formatUpdatedAt = (iso?: string | null) => {
 export default function RoadmapBuilder() {
   const navigate = useNavigate();
   const { workspaceId, projectId } = useParams<{ workspaceId?: string; projectId?: string }>();
+  const botName = useMemo(() => getStoredAgentName(), []);
+  const introMessage = useMemo(() => getIntroMessage(botName), [botName]);
   const [projectTitle, setProjectTitle] = useState<string>("Roadmap");
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: INTRO_MESSAGE },
+    { role: "assistant", content: introMessage },
   ]);
   const [inputValue, setInputValue] = useState("");
   const [roadmapContent, setRoadmapContent] = useState<string | null>(null);
@@ -727,7 +730,7 @@ export default function RoadmapBuilder() {
                   Roadmap assistant
                 </p>
                 <h2 className="text-[20px] font-semibold tracking-[-0.3125px] text-[#101828]">
-                  Plan with ProductBot
+                  {`Plan with ${botName}`}
                 </h2>
                 <p className="text-[13px] text-[#6a7282]">
                   I can help structure your roadmap and keep the preview updated in real time.
@@ -765,7 +768,7 @@ export default function RoadmapBuilder() {
               {isSending && (
                 <div className="flex justify-start">
                   <div className="max-w-[640px] rounded-[16px] border border-[#e5e7eb] bg-white px-4 py-3 text-[14px] leading-[22px] text-[#101828]">
-                    <TypingIndicator label="ProductBot" />
+                    <TypingIndicator label={botName} />
                   </div>
                 </div>
               )}
@@ -817,7 +820,7 @@ export default function RoadmapBuilder() {
               <button
                 type="button"
                 className={`h-[46px] border-b-2 px-4 text-[14px] font-medium ${
-                  rightTab === "preview" ? "border-transparent text-[#4a5565]" : "border-[#9810fa] text-[#9810fa]"
+                  rightTab === "preview" ? "border-[#9810fa] text-[#9810fa]" : "border-transparent text-[#4a5565]"
                 }`}
                 onClick={() => setRightTab("preview")}
               >
@@ -848,7 +851,7 @@ export default function RoadmapBuilder() {
                   </div>
                 ) : (
                   <p className="text-[13px] text-[#6a7282]">
-                    No roadmap yet. Ask ProductBot to generate one and the preview will appear here.
+                    {`No roadmap yet. Ask ${botName} to generate one and the preview will appear here.`}
                   </p>
                 )}
               </div>

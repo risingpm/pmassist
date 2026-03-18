@@ -9,7 +9,7 @@ from .database import get_db
 from .models import Project, Roadmap
 from .workspaces import get_project_in_workspace
 from backend.rbac import ensure_project_access
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import metered_chat_completion
 
 router = APIRouter()
 
@@ -51,11 +51,14 @@ def generate_roadmap(id: str, workspace_id: UUID, user_id: UUID, db: Session = D
     """
 
     # Call OpenAI
-    client = get_openai_client(db, workspace_id)
-    response = client.chat.completions.create(
+    response = metered_chat_completion(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        feature="roadmap.generate",
         model="gpt-4.1",
         messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"}   # ✅ ensures proper JSON
+        response_format={"type": "json_object"},   # ✅ ensures proper JSON
     )
 
     # Parse JSON properly

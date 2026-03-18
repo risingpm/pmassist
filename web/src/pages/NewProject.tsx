@@ -14,6 +14,7 @@ import {
 } from "../api";
 import { useUserRole } from "../context/RoleContext";
 import TypingIndicator from "../components/TypingIndicator";
+import { getStoredAgentName } from "../utils/agentProfile";
 
 type InlineIconName =
   | "back"
@@ -157,13 +158,14 @@ export default function NewProject() {
   const navigate = useNavigate();
   const { workspaceId, projectId } = useParams<{ workspaceId?: string; projectId?: string }>();
   const { workspaceRole } = useUserRole();
+  const botName = useMemo(() => getStoredAgentName(), []);
   const [inputValue, setInputValue] = useState("");
   const introMessage = useMemo(
     () =>
       projectId
         ? "You're editing this project. Tell me what you'd like to change or add, and I’ll update the details."
-        : "Hi! I'll help you create your project. Tell me about what you're building - the name, what it's about, goals, target users, or anything else that's important to capture.",
-    [projectId]
+        : `Hi! I'm ${botName}. I'll help you create your project. Tell me about what you're building - the name, what it's about, goals, target users, or anything else that's important to capture.`,
+    [projectId, botName]
   );
   const [messages, setMessages] = useState<ProjectBuilderMessage[]>([
     {
@@ -693,7 +695,7 @@ export default function NewProject() {
                   <InlineIcon name="assistant" className="h-4 w-4" />
                 </div>
                 <div className="max-w-[650px] rounded-[16px] border border-[#e5e7eb] bg-white px-4 py-3 text-[14px] leading-[22.75px] text-[#101828]">
-                  <TypingIndicator label="ProductBot" />
+                  <TypingIndicator label={botName} />
                 </div>
               </div>
             )}
@@ -746,7 +748,7 @@ export default function NewProject() {
                   type="button"
                   className={`h-full border-b-2 px-3 text-[14px] font-medium ${
                     activeSideTab === "preview"
-                      ? "border-transparent text-[#4a5565]"
+                      ? "border-[#9810fa] text-[#9810fa]"
                       : "border-transparent text-[#4a5565]"
                   }`}
                   onClick={() => setActiveSideTab("preview")}

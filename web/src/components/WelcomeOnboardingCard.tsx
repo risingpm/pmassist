@@ -55,7 +55,7 @@ export default function WelcomeOnboardingCard({
         <div className="flex h-full flex-col items-center px-12 pt-12 text-center">
           <img alt="" className="h-20 w-20" src={logoUrl} />
           <div className="mt-6">
-            <GradientTitle>Welcome to 8product.ai</GradientTitle>
+            <GradientTitle>Welcome to 8product.com</GradientTitle>
           </div>
           <p className="mt-4 max-w-[510px] text-center text-[18px] font-normal leading-[28px] tracking-[-0.4395px] text-[#4a5565]">
             Your AI-powered workspace for product management. Let&apos;s get you set up in just a

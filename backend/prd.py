@@ -11,7 +11,7 @@ from . import models, schemas
 from .workspaces import get_project_in_workspace
 from backend.rbac import ensure_membership, ensure_project_access
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, update_entry_embedding
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import metered_chat_completion
 from backend.project_research import _fetch_website_text, normalize_project_website
 from backend.template_service import get_template_version
 from backend.ai_guardrails import DECLINE_PHRASE, bundle_context_entries, render_context_block, verify_citations
@@ -149,6 +149,32 @@ def _record_prd_messages(
             created_by=None,
         )
     )
+
+
+def _get_recent_prd_chat_context(
+    db: Session,
+    *,
+    prd_id: UUID,
+    limit: int = 8,
+) -> str:
+    rows = (
+        db.query(models.PRDChatMessage)
+        .filter(models.PRDChatMessage.prd_id == prd_id)
+        .order_by(models.PRDChatMessage.created_at.desc())
+        .limit(max(1, min(limit, 20)))
+        .all()
+    )
+    if not rows:
+        return "No prior chat context."
+    lines: list[str] = []
+    for row in reversed(rows):
+        role = "User" if row.role == "user" else "Assistant"
+        text = (row.content or "").strip()
+        if len(text) > 500:
+            text = f"{text[:500]}..."
+        if text:
+            lines.append(f"{role}: {text}")
+    return "\n".join(lines) if lines else "No prior chat context."
 
 
 def _get_prd_note_entries(
@@ -311,7 +337,7 @@ def _resolve_prd_agent_settings(
     default_temperature: float,
 ) -> tuple[models.AIAgent | None, str, float, int | None]:
     agent = get_default_prd_agent(db, workspace_id)
-    model_name = agent.model_name if agent and agent.model_name else "gpt-4o-mini"
+    model_name = agent.model_name if agent and agent.model_name else "gpt-5-mini"
     temperature = agent.temperature if agent and agent.temperature is not None else default_temperature
     max_tokens = agent.max_tokens if agent and agent.max_tokens else None
     return agent, model_name, temperature, max_tokens
@@ -323,6 +349,7 @@ def _call_prd_assistant(
     *,
     system_prompt: str,
     user_prompt: str,
+    user_id: UUID | None = None,
 ) -> str:
     agent, model_name, temperature, max_tokens = _resolve_prd_agent_settings(
         db,
@@ -330,11 +357,14 @@ def _call_prd_assistant(
         default_temperature=0.4,
     )
     system_prompt = _build_prd_system_prompt(agent, system_prompt)
-    client = get_openai_client(db, workspace_id)
     kwargs = {}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
-    response = client.chat.completions.create(
+    response = metered_chat_completion(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        feature="prd.assistant",
         model=model_name,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -880,11 +910,14 @@ User instructions: {prd_data.prompt}
         default_temperature=0.4,
     )
     system_prompt = _build_prd_system_prompt(agent, "You are an expert product manager who writes PRDs.")
-    client = get_openai_client(db, workspace_id)
     kwargs = {}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
-    response = client.chat.completions.create(
+    response = metered_chat_completion(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        feature="prd.generate.workspace",
         model=model_name,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -1064,6 +1097,7 @@ def refine_prd_without_project(
 
     if prd.content is None:
         combined_prompt = _merge_prompt(prd.description, refine_data.instructions)
+        conversation_context = _get_recent_prd_chat_context(db, prd_id=prd.id)
         context_query = "\n".join(filter(None, [prd.feature_name, combined_prompt]))
         kb_entries = (
             get_relevant_entries(db, workspace_id, context_query, top_n=5)
@@ -1106,6 +1140,9 @@ Project Context: Not provided (draft PRD without a project).
 Workspace Knowledge Base:
 {context_block}
 
+Recent PRD chat context:
+{conversation_context}
+
 Guidance:
 - Cite workspace references inline using their markers like [CTX1] when applicable.
 - If the knowledge base lacks direct evidence, {best_effort_line}
@@ -1122,11 +1159,14 @@ User instructions: {combined_prompt}
             default_temperature=0.4,
         )
         system_prompt = _build_prd_system_prompt(agent, "You are an expert product manager who writes PRDs.")
-        client = get_openai_client(db, workspace_id)
         kwargs = {}
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
-        response = client.chat.completions.create(
+        response = metered_chat_completion(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            feature="prd.refine.workspace",
             model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1179,32 +1219,29 @@ User instructions: {combined_prompt}
         and not _is_refinement_request(refine_data.instructions)
         and not _should_generate_prd(refine_data.instructions, prd.feature_name, prd_settings)
     ):
-        project_context = _project_context_block(project)
+        workspace_context = "Workspace Context: General workspace PRD (no specific project attached)."
+        conversation_context = _get_recent_prd_chat_context(db, prd_id=prd.id)
         context_query = "\n".join(
             filter(
                 None,
                 [
-                    project.title,
-                    project.description,
-                    project.goals,
-                    project.north_star_metric,
                     prd.feature_name,
                     refine_data.instructions,
+                    prd.content,
+                    conversation_context,
                 ],
             )
         )
         kb_entries = get_relevant_entries(
             db,
-            project.workspace_id,
+            workspace_id,
             context_query,
             top_n=5,
-            project_id=UUID(project_id),
         )
         note_entries = _get_prd_note_entries(
             db,
-            workspace_id=project.workspace_id,
+            workspace_id=workspace_id,
             prd_id=prd.id,
-            project_id=UUID(project_id),
         )
         merged_entries = _merge_context_entries(kb_entries, note_entries)
         _, context_block, _ = _context_payload(merged_entries)
@@ -1216,10 +1253,11 @@ User instructions: {combined_prompt}
                 "to improve the PRD draft. Keep it friendly and brief."
             ),
             user_prompt=(
-                f"{project_context}\n\n"
+                f"{workspace_context}\n\n"
+                f"Recent PRD chat context:\n{conversation_context}\n\n"
                 f"Workspace Knowledge Base:\n{context_block}\n\n"
                 f"User message: {refine_data.instructions}\n\n"
-                "Ask clarifying questions that reference the project context when possible."
+                "Ask clarifying questions that reference the existing PRD and workspace context when possible."
             ),
         )
         _record_prd_messages(
@@ -1247,6 +1285,7 @@ User instructions: {combined_prompt}
         .all()
     )
     previous_prds_text = "\n---\n".join([p.content or "" for p in previous_prds]) if previous_prds else "None"
+    conversation_context = _get_recent_prd_chat_context(db, prd_id=prd.id)
     refine_query = "\n".join(filter(None, [prd.feature_name, refine_data.instructions, prd.content]))
     kb_entries = get_relevant_entries(db, workspace_id, refine_query, top_n=5)
     note_entries = _get_prd_note_entries(db, workspace_id=workspace_id, prd_id=prd.id)
@@ -1261,6 +1300,9 @@ Other PRDs for reference:
 
 Workspace knowledge base and PRD notes:
 {note_block}
+
+Recent PRD chat context:
+{conversation_context}
 
 Here is the current PRD to refine:
 {prd.content or ''}
@@ -1278,11 +1320,14 @@ Please update the PRD accordingly while preserving its structure, goals, and con
         default_temperature=0.4,
     )
     system_prompt = _build_prd_system_prompt(agent, "You refine PRDs with clear, concise Markdown.")
-    client = get_openai_client(db, workspace_id)
     kwargs = {}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
-    response = client.chat.completions.create(
+    response = metered_chat_completion(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        feature="prd.refine.current.workspace",
         model=model_name,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -2075,11 +2120,14 @@ User instructions: {prd_data.prompt}
         default_temperature=0.4,
     )
     system_prompt = _build_prd_system_prompt(agent, "You are an expert product manager who writes PRDs.")
-    client = get_openai_client(db, workspace_id)
     kwargs = {}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
-    response = client.chat.completions.create(
+    response = metered_chat_completion(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        feature="prd.generate.project",
         model=model_name,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -2272,6 +2320,7 @@ def refine_prd(
 
     if prd.content is None:
         combined_prompt = _merge_prompt(prd.description, refine_data.instructions)
+        conversation_context = _get_recent_prd_chat_context(db, prd_id=prd.id)
         context_query = "\n".join(
             filter(
                 None,
@@ -2282,6 +2331,7 @@ def refine_prd(
                     project.north_star_metric,
                     prd.feature_name,
                     combined_prompt,
+                    conversation_context,
                 ],
             )
         )
@@ -2322,6 +2372,9 @@ Website or Key URL: {project.website_url or 'Not provided'}
 Workspace Knowledge Base:
 {context_block}
 
+Recent PRD chat context:
+{conversation_context}
+
 Guidance:
 - Cite workspace references inline using their markers like [CTX1] when applicable.
 - If the knowledge base lacks direct evidence, provide a best-effort PRD using the project description, goals, persona assumptions, and industry best practices. Never reply with "{DECLINE_PHRASE}".
@@ -2339,11 +2392,14 @@ User instructions: {combined_prompt}
             default_temperature=0.4,
         )
         system_prompt = _build_prd_system_prompt(agent, "You are an expert product manager who writes PRDs.")
-        client = get_openai_client(db, workspace_id)
         kwargs = {}
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
-        response = client.chat.completions.create(
+        response = metered_chat_completion(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            feature="prd.refine.project",
             model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -2394,6 +2450,7 @@ User instructions: {combined_prompt}
         and not _is_refinement_request(refine_data.instructions)
         and not _should_generate_prd(refine_data.instructions, prd.feature_name, prd_settings)
     ):
+        conversation_context = _get_recent_prd_chat_context(db, prd_id=prd.id)
         intake_message = _call_prd_assistant(
             db,
             workspace_id,
@@ -2401,7 +2458,10 @@ User instructions: {combined_prompt}
                 "You are a senior product manager. Ask 2-3 concise clarifying questions "
                 "to improve the PRD draft. Keep it friendly and brief."
             ),
-            user_prompt=f"User message: {refine_data.instructions}",
+            user_prompt=(
+                f"Recent PRD chat context:\n{conversation_context}\n\n"
+                f"User message: {refine_data.instructions}"
+            ),
         )
         _record_prd_messages(
             db,
@@ -2432,6 +2492,7 @@ User instructions: {combined_prompt}
             .all()
         )
     previous_prds_text = "\n---\n".join([p.content for p in previous_prds]) if previous_prds else "None"
+    conversation_context = _get_recent_prd_chat_context(db, prd_id=prd.id)
 
     refine_query = "\n".join(
         filter(
@@ -2495,6 +2556,7 @@ User instructions: {combined_prompt}
         {"role": "user", "content": personas_text},
         {"role": "user", "content": f"Workspace knowledge base and PRD notes:\n{context_block}\n\nReference knowledge entries with citations like [CTX1]. If none apply, reply with the exact phrase \"{DECLINE_PHRASE}\" instead of inventing details."},
         {"role": "user", "content": f"Other PRDs for reference:\n{previous_prds_text}"},
+        {"role": "user", "content": f"Recent PRD chat context:\n{conversation_context}"},
         {"role": "user", "content": f"Here is the current PRD to refine:\n{prd.content or ''}"},
         {"role": "user", "content": f"Refinement instructions:\n{refine_data.instructions}\n\nPlease update the PRD accordingly while preserving its structure, goals, and context."},
     ]
@@ -2502,8 +2564,11 @@ User instructions: {combined_prompt}
         messages.append({"role": "user", "content": template_section.strip()})
 
     # Call OpenAI
-    client = get_openai_client(db, workspace_id)
-    response = client.chat.completions.create(
+    response = metered_chat_completion(
+        db,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        feature="prd.refine.current.project",
         model=model_name,
         messages=messages,
         temperature=temperature,
@@ -2859,11 +2924,14 @@ def prd_question_answer(
             agent,
             "You summarize PRD changes and decisions with precise citations.",
         )
-        client = get_openai_client(db, workspace_id)
         kwargs = {}
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
-        completion = client.chat.completions.create(
+        completion = metered_chat_completion(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            feature="prd.qa",
             model=model_name,
             temperature=temperature,
             messages=[

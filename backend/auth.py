@@ -127,7 +127,12 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def _auth_response_for_user(db: Session, user: models.User, workspace_hint: models.Workspace | None = None) -> schemas.AuthResponse:
+def _auth_response_for_user(
+    db: Session,
+    user: models.User,
+    workspace_hint: models.Workspace | None = None,
+    is_new_user: bool = False,
+) -> schemas.AuthResponse:
     workspace = workspace_hint or get_current_workspace(db, user.id)
     role = None
     workspace_id = None
@@ -151,6 +156,7 @@ def _auth_response_for_user(db: Session, user: models.User, workspace_hint: mode
         workspace_id=workspace_id,
         workspace_name=workspace_name,
         workspace_role=role,
+        is_new_user=is_new_user,
     )
 
 
@@ -173,7 +179,7 @@ def signup(payload: schemas.AuthCreate, db: Session = Depends(get_db)):
     workspace_name = f"{payload.email.split('@')[0]}'s Workspace"
     workspace = create_workspace_with_owner(db, name=workspace_name, owner_id=user.id)
 
-    return _auth_response_for_user(db, user, workspace_hint=workspace)
+    return _auth_response_for_user(db, user, workspace_hint=workspace, is_new_user=True)
 
 
 @router.post("/login", response_model=schemas.AuthResponse)
@@ -227,11 +233,13 @@ def google_login(payload: schemas.GoogleAuthRequest, db: Session = Depends(get_d
         .first()
     )
     workspace = None
+    is_new_user = False
     if not user:
         user = models.User(email=email, google_sub=sub, display_name=display_name)
         db.add(user)
         db.commit()
         db.refresh(user)
+        is_new_user = True
         default_name = display_name or email.split("@")[0]
         workspace = create_workspace_with_owner(
             db,
@@ -259,7 +267,7 @@ def google_login(payload: schemas.GoogleAuthRequest, db: Session = Depends(get_d
                 owner_id=user.id,
             )
 
-    return _auth_response_for_user(db, user, workspace_hint=workspace)
+    return _auth_response_for_user(db, user, workspace_hint=workspace, is_new_user=is_new_user)
 
 
 @router.post("/initialize", response_model=schemas.AuthInitializeResponse)

@@ -734,7 +734,7 @@ class WorkspaceAgentBase(BaseModel):
     purpose: str | None = None
     instructions: str
     tone: str | None = None
-    model_name: str = "gpt-4o-mini"
+    model_name: str = "gpt-5-mini"
     temperature: float = 0.3
     max_tokens: int | None = None
     modules: list[str] = Field(default_factory=list)
@@ -884,6 +884,7 @@ class AuthResponse(BaseModel):
     workspace_id: UUID | None = None
     workspace_name: str | None = None
     workspace_role: WorkspaceRoleLiteral | None = None
+    is_new_user: bool = False
 
 
 class GoogleAuthRequest(BaseModel):

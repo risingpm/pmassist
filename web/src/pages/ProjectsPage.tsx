@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams, useMatch } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useMatch } from "react-router-dom";
 
 import ProjectDetail from "../components/ProjectDetail";
 import WorkspaceMembersPanel from "../components/WorkspaceMembersPanel";
@@ -7,20 +7,17 @@ import {
   createProject,
   createWorkspace,
   deleteProject,
-  deleteWorkspace,
   getProjects,
   getUserWorkspaces,
   getWorkspaceInvitations,
   resendWorkspaceInvitation,
   getWorkspaceMembers,
   inviteWorkspaceMember as inviteWorkspaceMemberRequest,
-  logout,
   removeWorkspaceMember,
   type WorkspaceInvitation,
   type WorkspaceMember,
   type WorkspaceRole,
   type WorkspaceSummary,
-  updateWorkspace,
   updateWorkspaceMemberRole,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY, WIDE_PAGE_CONTAINER } from "../constants";
@@ -30,9 +27,6 @@ import { SECTION_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, PILL_META } from "../s
 
 const svgToDataUri = (svg: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 
-const projectsHeaderIcon = svgToDataUri(
-  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'><rect x='3' y='4' width='14' height='12' rx='2' stroke='%237c3aed' stroke-width='1.7'/><path d='M3 8h14' stroke='%237c3aed' stroke-width='1.7'/></svg>"
-);
 const projectsPlusIcon = svgToDataUri(
   "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'><path d='M10 4v12M4 10h12' stroke='white' stroke-width='1.8' stroke-linecap='round'/></svg>"
 );
@@ -88,7 +82,22 @@ function BackChevronIcon() {
   );
 }
 
-type PanelView = "projects" | "workspace-members" | "templates";
+function ProjectsHeaderIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-5 w-5"
+      viewBox="0 0 20 20"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect x="3" y="4" width="14" height="12" rx="2" stroke="#7c3aed" strokeWidth="1.7" />
+      <path d="M3 8h14" stroke="#7c3aed" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+type PanelView = "projects" | "workspace-members";
 type ProjectTabRoute =
   | "knowledge"
   | "roadmap"
@@ -140,8 +149,6 @@ export default function ProjectsPage() {
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
-  const [renameLoading, setRenameLoading] = useState(false);
-  const [deleteLoading, setDeleteLoading] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
 
   useEffect(() => {
@@ -368,8 +375,6 @@ export default function ProjectsPage() {
     switch (view) {
       case "workspace-members":
         return `/workspaces/${id}/projects/members`;
-      case "templates":
-        return `/workspaces/${id}/templates`;
       default:
         return `/workspaces/${id}/projects`;
     }
@@ -385,7 +390,7 @@ export default function ProjectsPage() {
 
   const openKnowledgeBaseView = useCallback(() => {
     if (!workspaceId) return;
-    navigate(`/workspaces/${workspaceId}/knowledge`);
+    navigate(`/workspaces/${workspaceId}/projects`);
   }, [workspaceId, navigate]);
 
   const normalizePath = useCallback((path: string) => {
@@ -484,93 +489,6 @@ export default function ProjectsPage() {
     [workspaceId, userId]
   );
 
-  const handleDeleteWorkspace = useCallback(
-    async (targetWorkspaceId?: string, roleHint?: WorkspaceRole) => {
-      const resolvedId = targetWorkspaceId ?? workspaceId;
-      if (!resolvedId || !userId) {
-        setErrorMessage("Missing workspace context.");
-        return;
-      }
-      const targetId = resolvedId as string;
-      const isAdminForTarget = roleHint
-        ? normalizeWorkspaceRoleValue(roleHint) === "admin"
-        : canAdminWorkspace;
-      if (!isAdminForTarget) {
-        setErrorMessage("Only admins can delete a workspace.");
-        return;
-      }
-      const confirmMessage =
-        "Deleting this workspace will remove all projects, tasks, and documents. This cannot be undone. Continue?";
-      if (!window.confirm(confirmMessage)) return;
-      setDeleteLoading(true);
-      try {
-        await deleteWorkspace(targetId, userId);
-        const updatedList = workspaces.filter((ws) => ws.id !== targetId);
-        setWorkspaces(updatedList);
-        setSuccessMessage("Workspace deleted.");
-        if (targetId === workspaceId) {
-          if (updatedList.length > 0) {
-            const next = updatedList[0];
-            applyWorkspaceContext(next);
-            navigate(`/workspaces/${next.id}/projects`, { replace: true });
-          } else {
-            if (typeof window !== "undefined") {
-              [WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY].forEach((key) => window.sessionStorage.removeItem(key));
-            }
-            setWorkspaceId(null);
-            setWorkspaceName(null);
-            navigate("/onboarding", { replace: true });
-          }
-        }
-      } catch (err: any) {
-        setErrorMessage(err.message || "Failed to delete workspace.");
-      } finally {
-        setDeleteLoading(false);
-      }
-    },
-    [workspaceId, userId, canAdminWorkspace, workspaces, applyWorkspaceContext, navigate]
-  );
-
-  const handleRenameWorkspace = useCallback(
-    async (targetWorkspaceId?: string, roleHint?: WorkspaceRole) => {
-      const isAdminForTarget = roleHint
-        ? normalizeWorkspaceRoleValue(roleHint) === "admin"
-        : canAdminWorkspace;
-      if (!isAdminForTarget) {
-        setErrorMessage("Only admins can rename workspaces.");
-        return;
-      }
-      const resolvedId = targetWorkspaceId ?? workspaceId;
-      if (!resolvedId) {
-        setErrorMessage("Missing workspace context.");
-        return;
-      }
-      const targetId = resolvedId as string;
-      const current =
-        workspaces.find((ws) => ws.id === targetId)?.name ??
-        (targetId === workspaceId ? workspaceName ?? "Workspace" : "Workspace");
-      const nextName = window.prompt("Rename workspace", current)?.trim();
-      if (!nextName || nextName === current) return;
-      setRenameLoading(true);
-      try {
-        const updated = await updateWorkspace(targetId, nextName);
-        if (targetId === workspaceId) {
-          window.sessionStorage.setItem(WORKSPACE_NAME_KEY, updated.name);
-          setWorkspaceName(updated.name);
-        }
-        setWorkspaces((prev) =>
-          prev.map((ws) => (ws.id === targetId ? { ...ws, name: updated.name } : ws))
-        );
-        setSuccessMessage("Workspace renamed.");
-      } catch (err: any) {
-        setErrorMessage(err.message || "Failed to rename workspace.");
-      } finally {
-        setRenameLoading(false);
-      }
-    },
-    [canAdminWorkspace, workspaceId, workspaceName, workspaces]
-  );
-
   useEffect(() => {
     if (!userId) return;
     let canceled = false;
@@ -654,22 +572,6 @@ export default function ProjectsPage() {
       controller.abort();
     };
   }, [workspaceId, workspaceName, setWorkspaceRole]);
-
-  const handleSignOut = async () => {
-    try {
-      await logout();
-    } catch (err) {
-      console.warn("Sign out request failed", err);
-    }
-
-    if (typeof window !== "undefined") {
-      [AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_ID_KEY, WORKSPACE_NAME_KEY].forEach((key) =>
-        window.sessionStorage.removeItem(key)
-      );
-    }
-
-    navigate("/signin", { replace: true });
-  };
 
   const openWorkspaceModal = useCallback(() => {
     setWorkspaceModalName("");
@@ -761,158 +663,6 @@ export default function ProjectsPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="flex min-h-screen">
-        {false && (
-        <aside className="hidden w-72 flex-shrink-0 flex-col border-r border-slate-200 bg-white px-5 py-6 shadow-sm md:flex">
-          <div className="pb-4">
-            <p className={SECTION_LABEL}>Workspaces</p>
-            <p className="text-sm text-slate-500">Switch context or manage settings.</p>
-          </div>
-          <nav className="flex-1 space-y-3 overflow-y-auto text-sm">
-            {workspaces.map((ws) => {
-              const isActiveWorkspace = ws.id === workspaceId;
-              const workspaceRoleForEntry = normalizeWorkspaceRoleValue(ws.role);
-              const canAdminThisWorkspace = workspaceRoleForEntry === "admin";
-              return (
-                <details
-                  key={ws.id}
-                  className="rounded-2xl border border-slate-100 bg-slate-50/60 px-3 py-2"
-                  open={isActiveWorkspace}
-                >
-                  <summary
-                    className={`flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold ${
-                      isActiveWorkspace ? "text-blue-700" : "text-slate-600"
-                    }`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      handleWorkspaceNavigation(ws, "projects");
-                    }}
-                  >
-                    <span className="truncate">{ws.name}</span>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      {workspaceRoleForEntry}
-                    </span>
-                  </summary>
-                  <div className="mt-2 space-y-2 border-l border-slate-200 pl-3 text-xs">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-slate-400">Work</p>
-                      <button
-                        onClick={() => navigate(`/workspaces/${ws.id}/dashboard`)}
-                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
-                      >
-                        Dashboard
-                      </button>
-                      <button
-                        onClick={() => handleWorkspaceNavigation(ws, "projects")}
-                        className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
-                          isActiveWorkspace && activeView === "projects"
-                            ? "bg-blue-50 text-blue-700"
-                            : "text-slate-500 hover:bg-slate-100"
-                        }`}
-                      >
-                        Projects
-                      </button>
-                      <button
-                        onClick={() => navigate(`/workspaces/${ws.id}/knowledge`)}
-                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
-                      >
-                        Knowledge Base
-                      </button>
-                      <button
-                        onClick={() => handleWorkspaceNavigation(ws, "templates")}
-                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
-                      >
-                        Template Library
-                      </button>
-                      <button
-                        onClick={() => navigate(`/workspaces/${ws.id}/agents`)}
-                        className="mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold text-slate-500 transition hover:bg-slate-100"
-                      >
-                        Agents
-                      </button>
-                    </div>
-                    <details className="mt-3 rounded-xl border border-slate-200 bg-white/90">
-                      <summary className="cursor-pointer rounded-xl px-3 py-2 text-xs font-semibold text-slate-600">
-                        Workspace settings
-                      </summary>
-                      <div className="border-t border-slate-200 px-3 py-2 text-xs">
-                        <button
-                          onClick={(event) => {
-                            event.preventDefault();
-                            handleWorkspaceNavigation(ws, "workspace-members");
-                          }}
-                          className={`mt-1 block w-full rounded-full px-3 py-1 text-left font-semibold transition ${
-                            isActiveWorkspace && activeView === "workspace-members"
-                              ? "bg-blue-50 text-blue-700"
-                              : "text-slate-500 hover:bg-slate-100"
-                          }`}
-                        >
-                          Members
-                        </button>
-                        <div className="mt-3 space-y-2">
-                          <button
-                            disabled={!canAdminThisWorkspace || renameLoading}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              handleRenameWorkspace(ws.id, workspaceRoleForEntry);
-                            }}
-                            className={`block w-full rounded-full px-3 py-1 text-left font-semibold ${
-                              canAdminThisWorkspace ? "text-slate-600 hover:bg-slate-100" : "text-slate-300"
-                            } transition disabled:opacity-60`}
-                          >
-                            Rename workspace
-                          </button>
-                          <button
-                            disabled={!canAdminThisWorkspace || deleteLoading}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              handleDeleteWorkspace(ws.id, workspaceRoleForEntry);
-                            }}
-                            className={`block w-full rounded-full px-3 py-1 text-left font-semibold ${
-                              canAdminThisWorkspace ? "text-rose-600 hover:bg-rose-50" : "text-slate-300"
-                            } transition disabled:opacity-60`}
-                          >
-                            Delete workspace
-                          </button>
-                        </div>
-                      </div>
-                    </details>
-                  </div>
-                </details>
-              );
-            })}
-            {workspaces.length === 0 && !workspaceLoading && (
-              <p className="rounded-2xl bg-slate-100 px-3 py-2 text-xs text-slate-500">
-                No workspaces yet.
-              </p>
-            )}
-          </nav>
-          {canAdminWorkspace && (
-            <details className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-xs">
-              <summary className="cursor-pointer rounded-xl px-3 py-2 text-xs font-semibold text-slate-600">
-                Global settings
-              </summary>
-              <div className="border-t border-slate-200 px-2 py-3 space-y-2">
-                <Link
-                  to="/settings"
-                  className="block rounded-full bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-100"
-                >
-                  AI Providers
-                </Link>
-                <p className="text-[11px] text-slate-400">
-                  Configure organization-wide AI credentials, guardrails, and billing.
-                </p>
-              </div>
-            </details>
-          )}
-          <button
-            onClick={handleSignOut}
-            className="mt-4 w-full rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-          >
-            Sign out
-          </button>
-        </aside>
-        )}
-
         <main className="flex-1 bg-slate-50">
           {isProjectsView ? (
             <div className="min-h-screen bg-white">
@@ -937,7 +687,7 @@ export default function ProjectsPage() {
                       <div className="h-6 w-px bg-[#d1d5dc]" />
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-[#f3e8ff]">
-                          <img alt="" className="h-5 w-5" src={projectsHeaderIcon} />
+                          <ProjectsHeaderIcon />
                         </div>
                         <div>
                           <p className="text-[20px] font-semibold tracking-[-0.4492px] text-[#101828]">Projects</p>
@@ -1159,10 +909,10 @@ export default function ProjectsPage() {
                   {workspaceId && (
                     <button
                       type="button"
-                      onClick={() => navigate(`/workspaces/${workspaceId}/builder`)}
+                      onClick={() => navigate(`/workspaces/${workspaceId}/ai-chat`)}
                       className={SECONDARY_BUTTON}
                     >
-                      Prototype Builder
+                      AI Chat
                     </button>
                   )}
                   <button
