@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -51,10 +52,25 @@ logger = logging.getLogger(__name__)
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# CORS middleware (allow everything for now)
+# CORS middleware
+# Comma-separated origins can be set via env var CORS_ALLOWED_ORIGINS.
+# Example:
+#   https://8product.com,https://www.8product.com
+_cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+if _cors_env:
+    cors_allowed_origins = [origin.strip() for origin in _cors_env.split(",") if origin.strip()]
+else:
+    # Local/dev-safe fallback (explicit origins only, no wildcard).
+    cors_allowed_origins = [
+        "http://localhost:5173",
+        "http://localhost:5175",
+        "https://8product.com",
+        "https://www.8product.com",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
