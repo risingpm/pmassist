@@ -39,7 +39,7 @@ from backend.project_research import (
     normalize_project_website,
     clear_project_website_research,
 )
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import get_openai_client, resolve_openai_chat_model
 from backend.knowledge_base_service import ensure_workspace_kb, update_entry_embedding
 from backend.rbac import ensure_membership, ensure_project_access
 
@@ -343,7 +343,7 @@ def _call_project_builder(
     conversation = "\n".join(f"{msg.role}: {msg.content}" for msg in messages)
     payload = json.dumps(attributes or {}, ensure_ascii=False)
     response = client.chat.completions.create(
-        model="gpt-5-mini",
+        model=resolve_openai_chat_model(),
         messages=[
             {
                 "role": "system",
@@ -447,7 +447,7 @@ def _call_project_brief(
         title = (entry.title or "Context").strip()
         context_lines.append(f"- {title}{source}: {content}")
     response = client.chat.completions.create(
-        model="gpt-5-mini",
+        model=resolve_openai_chat_model(),
         messages=[
             {
                 "role": "system",

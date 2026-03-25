@@ -17,7 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.ai_providers import get_openai_client, decrypt_secret
+from backend.ai_providers import get_openai_client, decrypt_secret, resolve_openai_chat_model
 from backend.database import get_db
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, update_entry_embedding
 from backend.prd_service import search_prd_embeddings, build_prd_context_items
@@ -60,7 +60,7 @@ DEFAULT_AGENT_TEMPLATE_DATA: list[dict] = [
             "Summaries should be structured as Highlights, Risks, and Actions."
         ),
         "tone": "confident and collaborative",
-        "model_name": "gpt-5-mini",
+        "model_name": "gpt-4.1-mini",
         "temperature": 0.3,
         "max_tokens": 900,
         "modules": ["prd", "roadmap", "knowledge"],
@@ -85,7 +85,7 @@ DEFAULT_AGENT_TEMPLATE_DATA: list[dict] = [
             "Offer a crisp insight deck-style response with bullets for Signals, Opportunities, and Calls to action."
         ),
         "tone": "insightful and empathetic",
-        "model_name": "gpt-5-mini",
+        "model_name": "gpt-4.1-mini",
         "temperature": 0.4,
         "max_tokens": 800,
         "modules": ["knowledge"],
@@ -110,7 +110,7 @@ DEFAULT_AGENT_TEMPLATE_DATA: list[dict] = [
             "Close with a short motivating note for the team."
         ),
         "tone": "direct but encouraging",
-        "model_name": "gpt-5-mini",
+        "model_name": "gpt-4.1-mini",
         "temperature": 0.25,
         "max_tokens": 700,
         "modules": ["roadmap", "tasks"],
@@ -136,7 +136,7 @@ DEFAULT_AGENT_TEMPLATE_DATA: list[dict] = [
             "note recency, and flag risk level. When relevant, call out the exact roadmap phase or PRD section impacted and propose concrete owner + due date suggestions."
         ),
         "tone": "analytical and concise",
-        "model_name": "gpt-5-mini",
+        "model_name": "gpt-4.1-mini",
         "temperature": 0.25,
         "max_tokens": 1000,
         "modules": ["knowledge", "prd", "roadmap", "tasks"],
@@ -1023,7 +1023,7 @@ def run_agent(
     try:
         client = get_openai_client(db, workspace_id)
         completion = client.chat.completions.create(
-            model=agent.model_name or "gpt-5-mini",
+            model=resolve_openai_chat_model(agent.model_name),
             temperature=agent.temperature or 0.3,
             max_tokens=agent.max_tokens or 1000,
             messages=[

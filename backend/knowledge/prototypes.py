@@ -13,7 +13,7 @@ from openai import OpenAIError
 from sqlalchemy.orm import Session
 
 from backend import schemas
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import get_openai_client, resolve_openai_chat_model
 from backend.database import get_db
 from backend.models import (
     Prototype,
@@ -782,7 +782,7 @@ def generate_spec_with_openai(
 
     try:
         response = client.chat.completions.create(
-            model="gpt-5-mini",
+            model=resolve_openai_chat_model(),
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.4,

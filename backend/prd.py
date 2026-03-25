@@ -11,7 +11,7 @@ from . import models, schemas
 from .workspaces import get_project_in_workspace
 from backend.rbac import ensure_membership, ensure_project_access
 from backend.knowledge_base_service import ensure_workspace_kb, get_relevant_entries, update_entry_embedding
-from backend.ai_providers import metered_chat_completion
+from backend.ai_providers import metered_chat_completion, resolve_openai_chat_model
 from backend.project_research import _fetch_website_text, normalize_project_website
 from backend.template_service import get_template_version
 from backend.ai_guardrails import DECLINE_PHRASE, bundle_context_entries, render_context_block, verify_citations
@@ -337,7 +337,7 @@ def _resolve_prd_agent_settings(
     default_temperature: float,
 ) -> tuple[models.AIAgent | None, str, float, int | None]:
     agent = get_default_prd_agent(db, workspace_id)
-    model_name = agent.model_name if agent and agent.model_name else "gpt-5-mini"
+    model_name = resolve_openai_chat_model(agent.model_name if agent and agent.model_name else None)
     temperature = agent.temperature if agent and agent.temperature is not None else default_temperature
     max_tokens = agent.max_tokens if agent and agent.max_tokens else None
     return agent, model_name, temperature, max_tokens

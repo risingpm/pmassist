@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.ai_guardrails import DECLINE_PHRASE, bundle_context_entries, render_context_block, verify_citations, verify_from_items
-from backend.ai_providers import metered_chat_completion
+from backend.ai_providers import metered_chat_completion, resolve_openai_chat_model
 from backend.dashboard_service import collect_dashboard_metrics
 from backend.database import get_db
 from backend.knowledge_base_service import get_relevant_entries
@@ -133,7 +133,7 @@ def _generate_and_store_insight(db: Session, workspace_id: UUID, user_id: UUID) 
             workspace_id=workspace_id,
             user_id=user_id,
             feature="workspace.insight",
-            model="gpt-5-mini",
+            model=resolve_openai_chat_model(),
             temperature=0.2,
             messages=[
                 {"role": "system", "content": "You are an AI workspace coach. Respond only with valid JSON."},
@@ -395,7 +395,7 @@ def ask_workspace(payload: schemas.WorkspaceChatTurnRequest, db: Session = Depen
             workspace_id=payload.workspace_id,
             user_id=payload.user_id,
             feature="workspace.chat",
-            model="gpt-5-mini",
+            model=resolve_openai_chat_model(),
             temperature=0.2,
             messages=[
                 {

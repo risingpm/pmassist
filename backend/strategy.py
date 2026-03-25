@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import get_openai_client, resolve_openai_chat_model
 from backend.dashboard_service import collect_dashboard_metrics
 from backend.database import get_db
 from backend.rbac import ensure_project_access
@@ -401,7 +401,7 @@ def _generate_strategy(db: Session, workspace_id: UUID, project_id: UUID, user_i
     try:
         client = get_openai_client(db, workspace_id)
         completion = client.chat.completions.create(
-            model="gpt-5-mini",
+            model=resolve_openai_chat_model(),
             temperature=0.2,
             messages=[
                 {"role": "system", "content": "You are an AI CPO. Respond only with valid JSON."},
@@ -484,7 +484,7 @@ def ask_project_strategist(
     try:
         client = get_openai_client(db, payload.workspace_id)
         completion = client.chat.completions.create(
-            model="gpt-5-mini",
+            model=resolve_openai_chat_model(),
             temperature=0.3,
             messages=[
                 {"role": "system", "content": "You respond as an executive strategist."},

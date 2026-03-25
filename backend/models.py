@@ -598,7 +598,7 @@ class AIAgent(Base):
     tone = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
     accent_color = Column(String, nullable=True)
-    model_name = Column(String, nullable=False, default="gpt-5-mini")
+    model_name = Column(String, nullable=False, default="gpt-4.1-mini")
     temperature = Column(Float, nullable=False, default=0.3)
     max_tokens = Column(Integer, nullable=True)
     instructions = Column(Text, nullable=False)

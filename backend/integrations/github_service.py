@@ -16,7 +16,7 @@ import requests
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import get_openai_client, resolve_openai_chat_model
 from backend.knowledge.embeddings import generate_embedding
 from backend.models import (
     Document,
@@ -776,7 +776,7 @@ def _summarize_file(file_path: str, content: str, *, is_code: bool) -> str:
         )
 
     response = openai_client.chat.completions.create(
-        model="gpt-5-mini",
+        model=resolve_openai_chat_model(),
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},

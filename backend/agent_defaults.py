@@ -93,7 +93,7 @@ def _create_default_agent(
         capabilities=defaults.get("capabilities", []),
         context_config=defaults.get("context_config", {}),
         modules=defaults.get("modules", []),
-        model_name="gpt-5-mini",
+        model_name="gpt-4.1-mini",
         temperature=0.3,
     )
     db.add(agent)

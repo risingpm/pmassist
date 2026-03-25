@@ -21,6 +21,7 @@ from backend import models
 from backend.token_metering import record_openai_usage
 
 DEFAULT_DEV_CREDENTIAL_SECRET = "pmassist-dev-secret"
+DEFAULT_OPENAI_CHAT_MODEL = (os.getenv("OPENAI_CHAT_MODEL") or "gpt-4.1-mini").strip()
 DEFAULT_OPENAI_KWARGS: dict[str, Any] = {}
 _env_api_key = os.getenv("OPENAI_API_KEY")
 if _env_api_key:
@@ -106,6 +107,18 @@ def build_openai_kwargs(db: Session | None, workspace_id: UUID | None) -> dict[s
 def get_openai_client(db: Session | None, workspace_id: UUID | None) -> OpenAI:
     kwargs = build_openai_kwargs(db, workspace_id)
     return OpenAI(**kwargs)
+
+
+def resolve_openai_chat_model(model_name: str | None = None) -> str:
+    override = (os.getenv("OPENAI_CHAT_MODEL") or "").strip()
+    if override:
+        return override
+    if model_name and model_name.strip():
+        normalized = model_name.strip()
+        if normalized == "gpt-5-mini":
+            return DEFAULT_OPENAI_CHAT_MODEL
+        return normalized
+    return DEFAULT_OPENAI_CHAT_MODEL
 
 
 def test_openai_credentials(api_key: str, *, organization: str | None = None, project: str | None = None) -> None:

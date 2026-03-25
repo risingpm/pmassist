@@ -16,7 +16,7 @@ from backend.knowledge_base_service import ensure_workspace_kb, get_kb_context_e
 from backend.workspaces import get_project_in_workspace
 from backend.template_service import get_template_version
 from backend.ai_guardrails import bundle_context_entries, render_context_block, verify_citations
-from backend.ai_providers import metered_chat_completion
+from backend.ai_providers import metered_chat_completion, resolve_openai_chat_model
 from backend.agent_defaults import get_default_roadmap_agent
 
 logger = logging.getLogger(__name__)
@@ -379,7 +379,7 @@ def _plan_roadmap_turn_smart(
     heuristic_plan = _plan_roadmap_turn(history, prompt)
     try:
         agent = get_default_roadmap_agent(db, workspace_id)
-        model_name = agent.model_name if agent and agent.model_name else "gpt-5-mini"
+        model_name = resolve_openai_chat_model(agent.model_name if agent and agent.model_name else None)
         messages = [
             {"role": "system", "content": ROADMAP_TURN_PLANNER_PROMPT},
             {
@@ -564,7 +564,7 @@ def _generate_roadmap_markdown(
     try:
         # Try LLM generation first for better roadmap quality; keep strict timeout.
         agent = get_default_roadmap_agent(db, workspace_id)
-        model_name = agent.model_name if agent and agent.model_name else "gpt-5-mini"
+        model_name = resolve_openai_chat_model(agent.model_name if agent and agent.model_name else None)
         llm_messages: list[dict[str, str]] = [
             {"role": "system", "content": ROADMAP_GENERATOR_PROMPT},
             {"role": "user", "content": context_prompt},

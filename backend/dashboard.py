@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.ai_providers import get_openai_client
+from backend.ai_providers import get_openai_client, resolve_openai_chat_model
 from backend.database import get_db
 from backend.dashboard_service import collect_dashboard_metrics
 from backend.knowledge_base_service import get_relevant_entries, build_entry_content
@@ -73,7 +73,7 @@ def get_dashboard_coach(payload: schemas.DashboardCoachRequest, db: Session = De
     try:
         client = get_openai_client(db, payload.workspace_id)
         completion = client.chat.completions.create(
-            model="gpt-5-mini",
+            model=resolve_openai_chat_model(),
             temperature=0.2,
             messages=[
                 {"role": "system", "content": "Respond with JSON."},
