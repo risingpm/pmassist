@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 
@@ -21,6 +21,7 @@ import noteIcon from "../assets/prd-new/note-icon.svg";
 import emptyStateIcon from "../assets/prd-new/empty-state.svg";
 import TypingIndicator from "../components/TypingIndicator";
 import { getStoredAgentName } from "../utils/agentProfile";
+import { buildMessageWithAttachments } from "../utils/chatAttachments";
 const chatIcon = "https://www.figma.com/api/mcp/asset/86c14b18-8fd2-4570-911a-64f6d05b8bff";
 import {
   createPrd,
@@ -94,7 +95,12 @@ export default function NewPrd() {
   const [fileEntries, setFileEntries] = useState<
     Array<{ id: string; title: string; file_url?: string | null; created_at?: string }>
   >([]);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    Array<{ id: string; title: string; content?: string | null }>
+  >([]);
+  const [isUploadingChatAttachment, setIsUploadingChatAttachment] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const projectId = useMemo(() => searchParams.get("projectId"), [searchParams]);
   const headerProjectLabel = activePrdProjectId
@@ -323,9 +329,13 @@ export default function NewPrd() {
   };
 
   const handleSend = async () => {
-    if (!inputValue.trim() || isSending) return;
+    if ((!inputValue.trim() && pendingAttachments.length === 0) || isSending || isUploadingChatAttachment) return;
 
-    const userMessage = inputValue.trim();
+    const userMessage = buildMessageWithAttachments(
+      inputValue.trim(),
+      pendingAttachments,
+      "Please use the attached files as context for this PRD."
+    );
     setInputValue("");
     setStatusMessage(null);
     setIsSending(true);
@@ -404,6 +414,7 @@ export default function NewPrd() {
             timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
         ]);
+        setPendingAttachments([]);
         return;
       }
 
@@ -426,6 +437,7 @@ export default function NewPrd() {
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         },
       ]);
+      setPendingAttachments([]);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to generate PRD.");
     } finally {
@@ -502,6 +514,34 @@ export default function NewPrd() {
       setUploadError("Unable to upload file right now.");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleUploadChatAttachment = async (file: File) => {
+    if (!workspaceId) {
+      setStatusMessage("Select a workspace to upload files.");
+      return;
+    }
+    setIsUploadingChatAttachment(true);
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      data.append("title", file.name);
+      data.append("entry_type", "document");
+      const projectRef = activePrdProjectId || projectId;
+      if (projectRef) {
+        data.append("project_id", projectRef);
+      }
+      const tags = ["prd", "attachment", activePrdId ? `prd:${activePrdId}` : "prd:pending"];
+      data.append("tags", tags.join(","));
+      const created = await uploadKnowledgeBaseEntry(workspaceId, data);
+      setPendingAttachments((prev) => [...prev, { id: created.id, title: created.title, content: created.content }]);
+      setFileEntries((prev) => [created, ...prev]);
+      setStatusMessage("Attachment uploaded.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Unable to upload file right now.");
+    } finally {
+      setIsUploadingChatAttachment(false);
     }
   };
 
@@ -786,6 +826,42 @@ export default function NewPrd() {
 
               <div className="sticky bottom-0 z-10 border-t border-[#e5e7eb] bg-white">
                 <div className="flex flex-col gap-2 px-[69.5px] pb-0 pt-[17px]">
+                  <input
+                    ref={chatFileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        void handleUploadChatAttachment(file);
+                        event.target.value = "";
+                      }
+                    }}
+                  />
+                  {pendingAttachments.length > 0 || isUploadingChatAttachment ? (
+                    <div className="flex flex-wrap gap-2">
+                      {pendingAttachments.map((attachment) => (
+                        <div
+                          key={attachment.id}
+                          className="flex items-center gap-2 rounded-full border border-[#e5e7eb] bg-white px-3 py-1 text-[12px] text-[#364153]"
+                        >
+                          <span className="max-w-[220px] truncate">{attachment.title}</span>
+                          <button
+                            type="button"
+                            className="text-[#6a7282]"
+                            onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      {isUploadingChatAttachment ? (
+                        <div className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1 text-[12px] text-[#6a7282]">
+                          Uploading attachment...
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="flex items-center gap-3">
                     <div className="relative flex-1">
                       <input
@@ -803,6 +879,8 @@ export default function NewPrd() {
                       <button
                         type="button"
                         className="absolute right-[8px] top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center"
+                        onClick={() => chatFileInputRef.current?.click()}
+                        disabled={isUploadingChatAttachment}
                       >
                         <div className="relative h-5 w-5">
                           <img alt="" className="absolute inset-0 h-full w-full" src={clipVec1} />
@@ -813,10 +891,10 @@ export default function NewPrd() {
                     <button
                       type="button"
                       className={`flex h-12 w-12 items-center justify-center rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] ${
-                        inputValue.trim() ? "opacity-100" : "opacity-50"
+                        inputValue.trim() || pendingAttachments.length > 0 ? "opacity-100" : "opacity-50"
                       }`}
                       onClick={handleSend}
-                      disabled={!inputValue.trim() || isSending}
+                      disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isSending || isUploadingChatAttachment}
                     >
                       <img alt="" className="h-4 w-4" src={sendIcon} />
                     </button>

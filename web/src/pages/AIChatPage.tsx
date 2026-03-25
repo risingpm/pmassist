@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -9,13 +9,16 @@ import {
   getPrds,
   listWorkspaceChatSessions,
   listTaskBoards,
+  uploadKnowledgeBaseEntry,
   type PRDRecord,
+  type KnowledgeBaseEntry,
   type WorkspaceChatSessionSummary,
   type TaskBoardRecord,
   type WorkspaceChatMessage,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY } from "../constants";
 import { getStoredAgentName } from "../utils/agentProfile";
+import { buildAttachmentToastLabel, buildMessageWithAttachments } from "../utils/chatAttachments";
 
 type ProjectContextItem = {
   id: string;
@@ -135,6 +138,8 @@ export default function AIChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<KnowledgeBaseEntry[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   const [projects, setProjects] = useState<ProjectContextItem[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -146,6 +151,7 @@ export default function AIChatPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState<WorkspaceChatSessionSummary[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -279,8 +285,12 @@ export default function AIChatPage() {
   }, [selectedProject, sessionId, messages, botName]);
 
   const handleSend = async () => {
-    if (!workspaceId || !userId || !input.trim() || sending) return;
-    const baseQuestion = input.trim();
+    if (!workspaceId || !userId || (!input.trim() && pendingAttachments.length === 0) || sending || uploadingAttachment) return;
+    const baseQuestion = buildMessageWithAttachments(
+      input.trim(),
+      pendingAttachments,
+      "Please use the attached files as context for this chat."
+    );
     const question = selectedProject
       ? `Project Context: ${selectedProject.title}\n${baseQuestion}`
       : baseQuestion;
@@ -296,6 +306,7 @@ export default function AIChatPage() {
       setSessionId(response.session_id);
       setMessages(response.messages);
       setInput("");
+      setPendingAttachments([]);
       if (workspaceId && userId) {
         listWorkspaceChatSessions(workspaceId, userId).then(setChatHistory).catch(() => undefined);
       }
@@ -332,6 +343,32 @@ export default function AIChatPage() {
       setError(null);
     } catch (err: any) {
       setError(err.message || "Failed to load chat session.");
+    }
+  };
+
+  const handleAttachFile = async (file: File) => {
+    if (!workspaceId || !userId) return;
+    setUploadingAttachment(true);
+    setError(null);
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      data.append("title", file.name);
+      data.append("entry_type", "document");
+      if (selectedProjectId) {
+        data.append("project_id", selectedProjectId);
+      }
+      const tags = ["workspace_chat", "attachment"];
+      if (selectedProjectId) {
+        tags.push("project_chat", `project:${selectedProjectId}`);
+      }
+      data.append("tags", tags.join(","));
+      const entry = await uploadKnowledgeBaseEntry(workspaceId, data, userId);
+      setPendingAttachments((prev) => [...prev, entry]);
+    } catch (err: any) {
+      setError(err.message || "Failed to upload attachment.");
+    } finally {
+      setUploadingAttachment(false);
     }
   };
 
@@ -509,8 +546,52 @@ export default function AIChatPage() {
 
           <div className="absolute bottom-4 left-4 right-4 rounded-[16px] bg-[#f3f4f6] p-2">
             {error ? <p className="px-2 pb-1 text-[12px] text-[#fb2c36]">{error}</p> : null}
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  void handleAttachFile(file);
+                  event.target.value = "";
+                }
+              }}
+            />
+            {pendingAttachments.length > 0 || uploadingAttachment ? (
+              <div className="mb-2 flex flex-wrap gap-2 px-2">
+                {pendingAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center gap-2 rounded-full bg-white px-3 py-1 text-[12px] text-[#364153]"
+                  >
+                    <span className="max-w-[220px] truncate">{attachment.title}</span>
+                    <button
+                      type="button"
+                      className="text-[#6a7282]"
+                      onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {uploadingAttachment ? (
+                  <div className="rounded-full bg-white px-3 py-1 text-[12px] text-[#6a7282]">Uploading attachment...</div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex items-center gap-2">
-              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-[10px] text-[#6a7282]">
+              <button
+                type="button"
+                className="flex h-9 w-9 items-center justify-center rounded-[10px] text-[#6a7282]"
+                onClick={() => attachmentInputRef.current?.click()}
+                disabled={uploadingAttachment}
+                title={
+                  pendingAttachments.length
+                    ? `Attached: ${buildAttachmentToastLabel(pendingAttachments)}`
+                    : "Attach file"
+                }
+              >
                 <IconClip />
               </button>
               <input
@@ -527,7 +608,7 @@ export default function AIChatPage() {
               />
               <button
                 type="button"
-                disabled={!input.trim() || sending}
+                disabled={(!input.trim() && pendingAttachments.length === 0) || sending || uploadingAttachment}
                 onClick={() => void handleSend()}
                 className="flex h-8 w-9 items-center justify-center rounded-[14px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-white disabled:opacity-50"
               >

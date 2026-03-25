@@ -15,6 +15,7 @@ import {
 import { useUserRole } from "../context/RoleContext";
 import TypingIndicator from "../components/TypingIndicator";
 import { getStoredAgentName } from "../utils/agentProfile";
+import { buildMessageWithAttachments } from "../utils/chatAttachments";
 
 type InlineIconName =
   | "back"
@@ -178,6 +179,10 @@ export default function NewProject() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<"success" | "error" | "info">("info");
   const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    Array<{ id: string; title: string; content?: string | null }>
+  >([]);
+  const [isUploadingChatAttachment, setIsUploadingChatAttachment] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [suggestedDescription, setSuggestedDescription] = useState<string | null>(null);
   const [isContextUpdating, setIsContextUpdating] = useState(false);
@@ -196,6 +201,7 @@ export default function NewProject() {
   const [activeSideTab, setActiveSideTab] = useState<"preview" | "context">("preview");
   const [showSlowResponseNotice, setShowSlowResponseNotice] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
   const slowResponseTimerRef = useRef<number | null>(null);
   const lastChatPayloadRef = useRef<{
@@ -360,8 +366,15 @@ export default function NewProject() {
   };
 
   const handleSend = async () => {
-    if (!inputValue.trim() || isSending || !workspaceId) return;
-    const newMessage: ProjectBuilderMessage = { role: "user", content: inputValue.trim() };
+    if ((!inputValue.trim() && pendingAttachments.length === 0) || isSending || isUploadingChatAttachment || !workspaceId) return;
+    const newMessage: ProjectBuilderMessage = {
+      role: "user",
+      content: buildMessageWithAttachments(
+        inputValue.trim(),
+        pendingAttachments,
+        "Please use the attached files as context for this project."
+      ),
+    };
     setInputValue("");
     setStatusMessage(null);
     const updatedMessages = [...messages, newMessage];
@@ -370,6 +383,7 @@ export default function NewProject() {
       messages: updatedMessages,
       attributes,
     });
+    setPendingAttachments([]);
   };
 
   const handleRetryChat = async () => {
@@ -450,6 +464,46 @@ export default function NewProject() {
     } catch (error) {
       setStatusTone("error");
       setStatusMessage(error instanceof Error ? error.message : "Failed to upload file.");
+    }
+  };
+
+  const handleUploadChatAttachment = async (file: File) => {
+    if (!workspaceId) {
+      setStatusTone("error");
+      setStatusMessage("Select a workspace to upload files.");
+      return;
+    }
+    setIsUploadingChatAttachment(true);
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      data.append("title", file.name);
+      data.append("entry_type", "document");
+      if (projectId) {
+        data.append("project_id", projectId);
+      }
+      const tags = ["project_builder", "attachment"];
+      if (projectId) {
+        tags.push(`project:${projectId}`);
+      }
+      data.append("tags", tags.join(","));
+      const entry = await uploadKnowledgeBaseEntry(workspaceId, data);
+      setPendingAttachments((prev) => [...prev, { id: entry.id, title: entry.title, content: entry.content }]);
+      setContextEntries((prev) => [
+        {
+          id: entry.id,
+          title: entry.title,
+          content: entry.content,
+          source_url: entry.source_url,
+          type: "file",
+        },
+        ...prev,
+      ]);
+    } catch (error) {
+      setStatusTone("error");
+      setStatusMessage(error instanceof Error ? error.message : "Failed to upload file.");
+    } finally {
+      setIsUploadingChatAttachment(false);
     }
   };
 
@@ -716,7 +770,51 @@ export default function NewProject() {
             )}
           </div>
           <div className="sticky bottom-0 border-t border-[#e5e7eb] bg-white px-6 py-4">
+            <input
+              ref={chatFileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  void handleUploadChatAttachment(file);
+                  event.target.value = "";
+                }
+              }}
+            />
+            {pendingAttachments.length > 0 || isUploadingChatAttachment ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {pendingAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center gap-2 rounded-full border border-[#d1d5dc] bg-white px-3 py-1 text-[12px] text-[#364153]"
+                  >
+                    <span className="max-w-[220px] truncate">{attachment.title}</span>
+                    <button
+                      type="button"
+                      className="text-[#6a7282]"
+                      onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {isUploadingChatAttachment ? (
+                  <div className="rounded-full border border-[#d1d5dc] bg-white px-3 py-1 text-[12px] text-[#6a7282]">
+                    Uploading attachment...
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="flex h-9 w-10 items-center justify-center rounded-[8px] border border-[#d1d5dc] bg-white text-[#4a5565]"
+                onClick={() => chatFileInputRef.current?.click()}
+                disabled={isUploadingChatAttachment}
+              >
+                <InlineIcon name="upload" className="h-4 w-4" />
+              </button>
               <input
                 className="h-9 flex-1 rounded-[8px] bg-[#f3f3f5] px-4 text-[14px] text-[#101828] placeholder:text-[#717182]"
                 placeholder="Type your message..."
@@ -732,7 +830,7 @@ export default function NewProject() {
                 type="button"
                 className="flex h-9 w-10 items-center justify-center rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-white disabled:opacity-50"
                 onClick={handleSend}
-                disabled={!inputValue.trim() || isSending}
+                disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isSending || isUploadingChatAttachment}
               >
                 <InlineIcon name="send" className="h-4 w-4" />
               </button>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import {
@@ -7,13 +7,16 @@ import {
   generateTaskBoardDraft,
   getTaskBoard,
   listTaskBoards,
+  uploadKnowledgeBaseEntry,
   updateTaskBoard,
+  type KnowledgeBaseEntry,
   type TaskBoardRecord,
   type TaskPriority,
   type TaskStatus,
 } from "../api";
 import { AUTH_USER_KEY, USER_ID_KEY } from "../constants";
 import { getStoredAgentName } from "../utils/agentProfile";
+import { buildMessageWithAttachments } from "../utils/chatAttachments";
 
 type TaskItem = {
   id: string;
@@ -112,6 +115,8 @@ export default function TaskBoardBuilder() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<KnowledgeBaseEntry[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftTasks, setDraftTasks] = useState<Array<{ title: string; description: string; priority: TaskPriority; status: TaskStatus }>>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -128,6 +133,7 @@ export default function TaskBoardBuilder() {
     labels: [],
     labelInput: "",
   });
+  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -214,8 +220,12 @@ export default function TaskBoardBuilder() {
 
   const handleSend = async () => {
     if (!workspaceId || !userId) return;
-    const prompt = message.trim();
-    if (!prompt) return;
+    const prompt = buildMessageWithAttachments(
+      message.trim(),
+      pendingAttachments,
+      "Please use the attached files as context for this task board."
+    );
+    if (!prompt || uploadingAttachment) return;
 
     setMessage("");
     setSending(true);
@@ -262,6 +272,7 @@ export default function TaskBoardBuilder() {
       );
 
       setChat((prev) => [...prev, { role: "assistant", content: generated.assistant_message }]);
+      setPendingAttachments([]);
       setToast("Draft tasks generated.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Failed to generate tasks.");
@@ -314,6 +325,32 @@ export default function TaskBoardBuilder() {
       labelInput: "",
     });
     setTaskModalOpen(true);
+  };
+
+  const handleUploadChatAttachment = async (file: File) => {
+    if (!workspaceId || !userId) return;
+    setUploadingAttachment(true);
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      data.append("title", file.name);
+      data.append("entry_type", "document");
+      if (board?.project_id) {
+        data.append("project_id", board.project_id);
+      }
+      const tags = ["task_board", "attachment"];
+      if (board?.id) {
+        tags.push(`task_board:${board.id}`);
+      }
+      data.append("tags", tags.join(","));
+      const entry = await uploadKnowledgeBaseEntry(workspaceId, data, userId);
+      setPendingAttachments((prev) => [...prev, entry]);
+      setToast("Attachment added to task board chat.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Failed to upload attachment.");
+    } finally {
+      setUploadingAttachment(false);
+    }
   };
 
   const closeManualTaskModal = () => {
@@ -401,8 +438,6 @@ export default function TaskBoardBuilder() {
     setToast("Column added.");
   };
 
-  const canSend = useMemo(() => Boolean(message.trim()) && !sending, [message, sending]);
-
   return (
     <div className="min-h-screen bg-[#f9fafb]">
       <div className="flex min-h-screen">
@@ -448,9 +483,45 @@ export default function TaskBoardBuilder() {
           </div>
 
           <div className="border-t border-[#e5e7eb] bg-[#f9fafb] p-4">
-            <button type="button" className="mb-3 h-12 w-full rounded-[10px] border-2 border-[#dab2ff] text-[14px] font-medium text-[#9810fa]">
-              Add Context
+            <input
+              ref={chatFileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  void handleUploadChatAttachment(file);
+                  event.target.value = "";
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="mb-3 h-12 w-full rounded-[10px] border-2 border-[#dab2ff] text-[14px] font-medium text-[#9810fa]"
+              onClick={() => chatFileInputRef.current?.click()}
+              disabled={uploadingAttachment}
+            >
+              {uploadingAttachment ? "Uploading..." : "Add Attachment"}
             </button>
+            {pendingAttachments.length > 0 ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {pendingAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center gap-2 rounded-full border border-[#d1d5dc] bg-white px-3 py-1 text-[12px] text-[#364153]"
+                  >
+                    <span className="max-w-[190px] truncate">{attachment.title}</span>
+                    <button
+                      type="button"
+                      className="text-[#6a7282]"
+                      onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <input
                 className="h-9 flex-1 rounded-[8px] bg-[#f3f3f5] px-3 text-[14px] text-[#101828] placeholder:text-[#717182]"
@@ -468,7 +539,7 @@ export default function TaskBoardBuilder() {
                 type="button"
                 className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] disabled:opacity-50"
                 onClick={() => void handleSend()}
-                disabled={!canSend}
+                disabled={(!message.trim() && pendingAttachments.length === 0) || sending || uploadingAttachment}
               >
                 <IconSend />
               </button>

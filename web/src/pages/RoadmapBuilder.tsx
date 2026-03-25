@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -27,6 +27,7 @@ import { AUTH_USER_KEY, USER_ID_KEY, WORKSPACE_NAME_KEY } from "../constants";
 import SafeMarkdown from "../components/SafeMarkdown";
 import TypingIndicator from "../components/TypingIndicator";
 import { getStoredAgentName } from "../utils/agentProfile";
+import { buildMessageWithAttachments } from "../utils/chatAttachments";
 
 type RBIconName =
   | "back"
@@ -215,6 +216,11 @@ export default function RoadmapBuilder() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [draftContextId, setDraftContextId] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    Array<{ id: string; title: string; content?: string | null }>
+  >([]);
+  const [isUploadingChatAttachment, setIsUploadingChatAttachment] = useState(false);
+  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const linkedCount = selectedContextIds.size;
   const allCount = contextProjects.length + contextPrds.length;
@@ -405,8 +411,12 @@ export default function RoadmapBuilder() {
 
   const handleSend = async (prompt?: string) => {
     if (!workspaceId) return;
-    const message = (prompt ?? inputValue).trim();
-    if (!message || isSending) return;
+    const message = buildMessageWithAttachments(
+      (prompt ?? inputValue).trim(),
+      pendingAttachments,
+      "Please use the attached files as context for this roadmap."
+    );
+    if (!message || isSending || isUploadingChatAttachment) return;
 
     setIsSending(true);
     setErrorMessage(null);
@@ -447,6 +457,7 @@ export default function RoadmapBuilder() {
         setRoadmapContent(generatedRoadmap);
         setLastUpdatedAt(new Date().toISOString());
       }
+      setPendingAttachments([]);
     } catch (error) {
       const errMessage = error instanceof Error ? error.message : "Failed to generate roadmap.";
       const isNetworkFetchError =
@@ -493,6 +504,7 @@ export default function RoadmapBuilder() {
           setRoadmapContent(generatedRoadmap);
           setLastUpdatedAt(new Date().toISOString());
         }
+        setPendingAttachments([]);
         setErrorMessage(null);
       } catch (fallbackError) {
         setErrorMessage(
@@ -615,6 +627,31 @@ export default function RoadmapBuilder() {
       setToastMessage("Unable to upload file right now.");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleUploadChatAttachment = async (file: File) => {
+    if (!workspaceId || !contextTag) {
+      setErrorMessage("Open a roadmap session before uploading files.");
+      return;
+    }
+    setIsUploadingChatAttachment(true);
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      data.append("title", file.name);
+      data.append("entry_type", "document");
+      if (projectId) {
+        data.append("project_id", projectId);
+      }
+      data.append("tags", ["roadmap", "attachment", contextTag].join(","));
+      const entry = await uploadKnowledgeBaseEntry(workspaceId, data, userId);
+      setPendingAttachments((prev) => [...prev, { id: entry.id, title: entry.title, content: entry.content }]);
+      await refreshContextEntries();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to upload file right now.");
+    } finally {
+      setIsUploadingChatAttachment(false);
     }
   };
 
@@ -776,6 +813,18 @@ export default function RoadmapBuilder() {
             </div>
           </div>
           <div className="sticky bottom-0 border-t border-[#e5e7eb] bg-white px-6 py-4">
+            <input
+              ref={chatFileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  void handleUploadChatAttachment(file);
+                  event.target.value = "";
+                }
+              }}
+            />
             {suggestions.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-2">
                 {suggestions.map((suggestion) => (
@@ -790,7 +839,39 @@ export default function RoadmapBuilder() {
                 ))}
               </div>
             )}
+            {pendingAttachments.length > 0 || isUploadingChatAttachment ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {pendingAttachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center gap-2 rounded-full border border-[#d1d5dc] bg-white px-3 py-1 text-[12px] text-[#364153]"
+                  >
+                    <span className="max-w-[220px] truncate">{attachment.title}</span>
+                    <button
+                      type="button"
+                      className="text-[#6a7282]"
+                      onClick={() => setPendingAttachments((prev) => prev.filter((item) => item.id !== attachment.id))}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                {isUploadingChatAttachment ? (
+                  <div className="rounded-full border border-[#d1d5dc] bg-white px-3 py-1 text-[12px] text-[#6a7282]">
+                    Uploading attachment...
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="flex h-10 w-10 items-center justify-center rounded-[10px] border border-[#d1d5dc] bg-white text-[#4a5565]"
+                onClick={() => chatFileInputRef.current?.click()}
+                disabled={isUploadingChatAttachment}
+              >
+                <RBIcon name="upload" className="h-4 w-4" />
+              </button>
               <input
                 className="h-10 flex-1 rounded-[10px] bg-[#f3f3f5] px-4 text-[14px] text-[#101828] placeholder:text-[#717182]"
                 placeholder="Describe the roadmap you want..."
@@ -806,7 +887,7 @@ export default function RoadmapBuilder() {
                 type="button"
                 className="flex h-10 w-11 items-center justify-center rounded-[10px] bg-gradient-to-r from-[#9810fa] to-[#155dfc] text-white disabled:opacity-50"
                 onClick={() => handleSend()}
-                disabled={!inputValue.trim() || isSending}
+                disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isSending || isUploadingChatAttachment}
               >
                 <RBIcon name="send" className="h-4 w-4" />
               </button>
