@@ -1106,6 +1106,50 @@ class DashboardOverviewResponse(BaseModel):
     updated_at: datetime
 
 
+class DashboardProjectSummary(BaseModel):
+    id: UUID
+    title: str
+    description: str | None = None
+    meta: str
+    progress_percent: int
+    color: str | None = None
+    last_updated: datetime | None = None
+
+
+class DashboardActivityItem(BaseModel):
+    id: str
+    title: str
+    meta: str
+    badge: str
+    badge_tone: Literal["purple", "blue", "green", "amber"]
+    kind: Literal["prd", "roadmap", "task"]
+    occurred_at: datetime
+
+
+class DashboardUpcomingItem(BaseModel):
+    id: str
+    title: str
+    description: str
+    progress_percent: int = 0
+
+
+class DashboardTeamMember(BaseModel):
+    id: UUID
+    user_id: UUID
+    email: str
+    display_name: str
+    role: WorkspaceRoleLiteral
+
+
+class DashboardHomeResponse(BaseModel):
+    metrics: DashboardOverviewResponse
+    ai_automations: int
+    active_projects: list[DashboardProjectSummary]
+    recent_activity: list[DashboardActivityItem]
+    upcoming: list[DashboardUpcomingItem]
+    team: list[DashboardTeamMember]
+
+
 class DashboardCoachRequest(BaseModel):
     workspace_id: UUID
     user_id: UUID

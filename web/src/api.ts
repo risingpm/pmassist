@@ -1032,6 +1032,50 @@ export type DashboardOverview = {
   updated_at: string;
 };
 
+export type DashboardProjectSummary = {
+  id: string;
+  title: string;
+  description?: string | null;
+  meta: string;
+  progress_percent: number;
+  color?: string | null;
+  last_updated?: string | null;
+};
+
+export type DashboardActivityItem = {
+  id: string;
+  title: string;
+  meta: string;
+  badge: string;
+  badge_tone: "purple" | "blue" | "green" | "amber";
+  kind: "prd" | "roadmap" | "task";
+  occurred_at: string;
+};
+
+export type DashboardUpcomingItem = {
+  id: string;
+  title: string;
+  description: string;
+  progress_percent: number;
+};
+
+export type DashboardTeamMember = {
+  id: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  role: WorkspaceRole;
+};
+
+export type DashboardHome = {
+  metrics: DashboardOverview;
+  ai_automations: number;
+  active_projects: DashboardProjectSummary[];
+  recent_activity: DashboardActivityItem[];
+  upcoming: DashboardUpcomingItem[];
+  team: DashboardTeamMember[];
+};
+
 export type DashboardCoach = {
   message: string;
   suggestions: string[];
@@ -2983,6 +3027,16 @@ export async function getDashboardOverview(workspaceId: string, userId: string):
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to load dashboard overview");
+  }
+  return res.json();
+}
+
+export async function getDashboardHome(workspaceId: string, userId: string): Promise<DashboardHome> {
+  const query = buildWorkspaceQuery(workspaceId, userId);
+  const res = await fetch(`${API_BASE}/dashboard/home?${query}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to load dashboard");
   }
   return res.json();
 }

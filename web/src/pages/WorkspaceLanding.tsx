@@ -13,38 +13,12 @@ import navIntegrations from "../assets/dashboard/nav-integrations.svg";
 import userMenu from "../assets/dashboard/user-menu.svg";
 import {
   createBillingCheckoutSession,
-  getDashboardOverview,
-  getProjects,
-  getWorkspaceAgents,
+  getDashboardHome,
   getWorkspaceBillingStatus,
-  getWorkspaceMembers,
   logout,
-  type DashboardOverview,
-  type WorkspaceAgent,
-  type WorkspaceMember,
+  type DashboardHome,
 } from "../api";
 import { AUTH_USER_KEY, SHOW_SUBSCRIPTION_MODAL_KEY, USER_ID_KEY } from "../constants";
-
-type ProjectRecord = {
-  id: string;
-  title: string;
-  description: string;
-  goals: string;
-  color?: string | null;
-  prd_count?: number | null;
-  task_count?: number | null;
-  last_updated?: string | null;
-  created_at?: string | null;
-};
-
-type ActivityItem = {
-  id: string;
-  title: string;
-  meta: string;
-  badge: string;
-  badgeTone: "purple" | "blue" | "green" | "amber";
-  type: "prd" | "roadmap" | "task";
-};
 
 const NAV_ITEMS = [
   { label: "Dashboard", icon: navDashboard, active: true },
@@ -169,24 +143,7 @@ function relativeUpdate(value?: string | null) {
   return `Updated ${formatDateLabel(value)}`;
 }
 
-function deriveProjectProgress(project: ProjectRecord, overview: DashboardOverview | null) {
-  const taskCount = Number(project.task_count || 0);
-  const prdCount = Number(project.prd_count || 0);
-  const doneTasks = overview?.tasks.done ?? 0;
-  const totalTasks = overview?.tasks.total ?? 0;
-  if (taskCount > 0 && totalTasks > 0) {
-    return Math.max(8, Math.min(96, Math.round((doneTasks / totalTasks) * 100)));
-  }
-  if (taskCount > 0) {
-    return Math.max(15, Math.min(95, Math.round((prdCount / (taskCount + prdCount)) * 100)));
-  }
-  if (prdCount > 0) {
-    return Math.max(20, Math.min(92, prdCount * 18));
-  }
-  return 12;
-}
-
-function badgeClasses(tone: ActivityItem["badgeTone"]) {
+function badgeClasses(tone: "purple" | "blue" | "green" | "amber") {
   const classes = {
     purple: "bg-[#faf5ff] text-[#8200db] border-[#eadcff]",
     blue: "bg-[#eff6ff] text-[#155dfc] border-[#bfdbfe]",
@@ -204,10 +161,7 @@ export default function WorkspaceLanding() {
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [overview, setOverview] = useState<DashboardOverview | null>(null);
-  const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [agents, setAgents] = useState<WorkspaceAgent[]>([]);
-  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [dashboardHome, setDashboardHome] = useState<DashboardHome | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const profile = useMemo(() => {
@@ -239,6 +193,8 @@ export default function WorkspaceLanding() {
     return { name: resolvedName, subtitle, initials: label, email };
   }, []);
   const userId = typeof window !== "undefined" ? window.sessionStorage.getItem(USER_ID_KEY) ?? "" : "";
+
+  const overview = dashboardHome?.metrics ?? null;
 
   const kpiCards = useMemo(
     () => [
@@ -281,8 +237,8 @@ export default function WorkspaceLanding() {
       },
       {
         label: "AI Automations",
-        value: String(agents.length),
-        detail: agents.length ? `${agents.filter((agent) => agent.is_public !== false).length} active workspace agents` : "No agents configured yet",
+        value: String(dashboardHome?.ai_automations ?? 0),
+        detail: dashboardHome?.ai_automations ? `${dashboardHome.ai_automations} active workspace agents` : "No agents configured yet",
         tone: "amber" as const,
         icon: (
           <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 20 20" fill="none">
@@ -292,73 +248,32 @@ export default function WorkspaceLanding() {
         ),
       },
     ],
-    [agents.length, overview]
+    [dashboardHome, overview]
   );
 
-  const activeProjects = useMemo(() => {
-    return projects.slice(0, 3).map((project, index) => {
-      const progress = deriveProjectProgress(project, overview);
-      const taskCount = Number(project.task_count || 0);
-      const prdCount = Number(project.prd_count || 0);
-      return {
+  const activeProjects = useMemo(
+    () =>
+      (dashboardHome?.active_projects || []).map((project, index) => ({
         ...project,
-        progress,
+        progress: project.progress_percent,
         color: project.color || PROJECT_ROW_COLORS[index % PROJECT_ROW_COLORS.length],
-        meta:
-          prdCount || taskCount
-            ? `${prdCount} PRD${prdCount === 1 ? "" : "s"} • ${taskCount} task${taskCount === 1 ? "" : "s"}`
-            : "No linked deliverables yet",
-      };
-    });
-  }, [overview, projects]);
+      })),
+    [dashboardHome]
+  );
 
-  const recentActivity = useMemo<ActivityItem[]>(() => {
-    const prdItems: ActivityItem[] = (overview?.prds || []).slice(0, 3).map((prd) => ({
-      id: `prd-${prd.id}`,
-      title: prd.title,
-      meta: `PRD • ${formatDateLabel(prd.updated_at)}`,
-      badge: prd.status || "Draft",
-      badgeTone: prd.status?.toLowerCase() === "saved" ? "green" : "purple",
-      type: "prd",
-    }));
-    const roadmapItem: ActivityItem[] = overview?.roadmap.total_tasks
-      ? [
-          {
-            id: "roadmap-overview",
-            title: overview.roadmap.current_phase || "Workspace roadmap updated",
-            meta: `Roadmap • ${overview.roadmap.done_tasks}/${overview.roadmap.total_tasks} tasks complete`,
-            badge: `${overview.roadmap.completion_percent}% complete`,
-            badgeTone: "blue",
-            type: "roadmap",
-          },
-        ]
-      : [];
-    const taskItem: ActivityItem[] = overview?.tasks.total
-      ? [
-          {
-            id: "task-overview",
-            title: "Task board activity",
-            meta: `Tasks • ${overview.tasks.in_progress} in progress, ${overview.tasks.todo} to do`,
-            badge: `${overview.tasks.done} done`,
-            badgeTone: "amber",
-            type: "task",
-          },
-        ]
-      : [];
-    return [...prdItems, ...roadmapItem, ...taskItem].slice(0, 5);
-  }, [overview]);
+  const recentActivity = useMemo(() => dashboardHome?.recent_activity || [], [dashboardHome]);
 
-  const upcomingItems = useMemo(() => {
-    return activeProjects.slice(0, 3).map((project) => ({
-      id: project.id,
-      title: project.title,
-      description: relativeUpdate(project.last_updated || project.created_at),
-      progress: project.progress,
-    }));
-  }, [activeProjects]);
+  const upcomingItems = useMemo(
+    () =>
+      (dashboardHome?.upcoming || []).map((item) => ({
+        ...item,
+        progress: item.progress_percent,
+      })),
+    [dashboardHome]
+  );
 
   const visibleMembers = useMemo(() => {
-    if (members.length) return members.slice(0, 4);
+    if (dashboardHome?.team?.length) return dashboardHome.team.slice(0, 4);
     return [
       {
         id: "fallback-user",
@@ -366,10 +281,9 @@ export default function WorkspaceLanding() {
         email: profile.email,
         display_name: profile.name,
         role: "admin",
-        joined_at: new Date().toISOString(),
-      } as WorkspaceMember,
+      },
     ];
-  }, [members, profile.email, profile.name]);
+  }, [dashboardHome, profile.email, profile.name]);
 
   const handleNavClick = (route?: string) => {
     if (!workspaceId || !route) return;
@@ -413,18 +327,10 @@ export default function WorkspaceLanding() {
     setDashboardLoading(true);
     setDashboardError(null);
 
-    void Promise.all([
-      getDashboardOverview(workspaceId, userId),
-      getProjects(workspaceId, userId),
-      getWorkspaceAgents(workspaceId),
-      getWorkspaceMembers(workspaceId, userId),
-    ])
-      .then(([overviewResponse, projectsResponse, agentsResponse, membersResponse]) => {
+    void getDashboardHome(workspaceId, userId)
+      .then((response) => {
         if (cancelled) return;
-        setOverview(overviewResponse);
-        setProjects(Array.isArray(projectsResponse) ? (projectsResponse as ProjectRecord[]) : []);
-        setAgents(agentsResponse);
-        setMembers(membersResponse);
+        setDashboardHome(response);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -668,9 +574,7 @@ export default function WorkspaceLanding() {
                           <ProjectGlyph color={project.color || "#8b5cf6"} />
                           <p className="truncate text-[16px] font-semibold text-[#111827]">{project.title}</p>
                         </div>
-                        <p className="mt-2 truncate text-[14px] text-[#6b7280]">
-                          {project.description || project.goals || "No description yet"}
-                        </p>
+                        <p className="mt-2 truncate text-[14px] text-[#6b7280]">{project.description || "No description yet"}</p>
                       </div>
                       <div>
                         <div className="flex items-center justify-between text-[13px] font-medium text-[#6b7280]">
@@ -684,7 +588,7 @@ export default function WorkspaceLanding() {
                           />
                         </div>
                       </div>
-                      <div className="text-right text-[13px] text-[#6b7280]">{relativeUpdate(project.last_updated || project.created_at)}</div>
+                      <div className="text-right text-[13px] text-[#6b7280]">{relativeUpdate(project.last_updated)}</div>
                     </button>
                   ))
                 ) : (
@@ -717,7 +621,7 @@ export default function WorkspaceLanding() {
                             <p className="mt-1 text-[13px] text-[#6b7280]">{item.meta}</p>
                           </div>
                           <span
-                            className={`shrink-0 rounded-full border px-3 py-1 text-[12px] font-semibold ${badgeClasses(item.badgeTone)}`}
+                            className={`shrink-0 rounded-full border px-3 py-1 text-[12px] font-semibold ${badgeClasses(item.badge_tone)}`}
                           >
                             {item.badge}
                           </span>

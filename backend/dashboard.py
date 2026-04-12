@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.ai_providers import get_openai_client, resolve_openai_chat_model
 from backend.database import get_db
-from backend.dashboard_service import collect_dashboard_metrics
+from backend.dashboard_service import collect_dashboard_home, collect_dashboard_metrics
 from backend.knowledge_base_service import get_relevant_entries, build_entry_content
 from backend.rbac import ensure_membership
 
@@ -30,6 +30,13 @@ def get_dashboard_overview(workspace_id: UUID, user_id: UUID, db: Session = Depe
     ensure_membership(db, workspace_id, user_id, required_role="viewer")
     metrics = collect_dashboard_metrics(db, workspace_id)
     return schemas.DashboardOverviewResponse(**metrics)
+
+
+@router.get("/home", response_model=schemas.DashboardHomeResponse)
+def get_dashboard_home(workspace_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    ensure_membership(db, workspace_id, user_id, required_role="viewer")
+    home = collect_dashboard_home(db, workspace_id)
+    return schemas.DashboardHomeResponse(**home)
 
 
 def _coach_prompt(metrics: dict[str, Any], kb_entries: list[models.KnowledgeBaseEntry]) -> str:
